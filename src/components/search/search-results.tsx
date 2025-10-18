@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { createClient } from '@/lib/supabase-client'
+import { createClient } from '@/utils/supabase/client'
 import { SearchBar } from './search-bar'
 import { LoadingSpinner } from '@/components/ui/loading-spinner'
 import { formatCurrency, formatDate } from '@/lib/utils'

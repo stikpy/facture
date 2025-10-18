@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { createClient } from '@/lib/supabase-client'
+import { createClient } from '@/utils/supabase/client'
 import { FileText, CheckCircle, Clock, AlertCircle } from 'lucide-react'
 
 interface Stats {
@@ -14,6 +14,7 @@ interface Stats {
 export function StatsCards() {
   const [stats, setStats] = useState<Stats>({ total: 0, completed: 0, processing: 0, error: 0 })
   const [loading, setLoading] = useState(true)
+  const [summary, setSummary] = useState<{ monthTotal?: number; topSupplier?: string }>({})
 
   useEffect(() => {
     const supabase = createClient()
@@ -37,6 +38,17 @@ export function StatsCards() {
         }, { total: 0, completed: 0, processing: 0, error: 0 } as Stats)
 
         setStats(statsData)
+
+        // Résumé via API stats
+        try {
+          const res = await fetch('/api/stats')
+          if (res.ok) {
+            const json = await res.json()
+            const lastMonth = (json.byMonth || []).slice(-1)[0]
+            const top = (json.bySupplier || [])[0]
+            setSummary({ monthTotal: lastMonth?.total, topSupplier: top?.supplier })
+          }
+        } catch {}
       } catch (error) {
         console.error('Erreur lors du chargement des statistiques:', error)
       } finally {
@@ -66,7 +78,8 @@ export function StatsCards() {
       value: stats.total,
       icon: FileText,
       color: 'text-blue-600',
-      bgColor: 'bg-blue-50'
+      bgColor: 'bg-blue-50',
+      extra: summary.monthTotal !== undefined ? `Mois en cours: ${summary.monthTotal?.toFixed(2)} €` : undefined
     },
     {
       title: 'Traitées',
@@ -80,7 +93,8 @@ export function StatsCards() {
       value: stats.processing,
       icon: Clock,
       color: 'text-yellow-600',
-      bgColor: 'bg-yellow-50'
+      bgColor: 'bg-yellow-50',
+      extra: summary.topSupplier ? `Top fournisseur: ${summary.topSupplier}` : undefined
     },
     {
       title: 'Erreurs',
@@ -102,6 +116,9 @@ export function StatsCards() {
             <div className="ml-4">
               <p className="text-sm font-medium text-gray-600">{card.title}</p>
               <p className="text-2xl font-semibold text-gray-900">{card.value}</p>
+              {card.extra && (
+                <p className="text-xs text-gray-500 mt-1">{card.extra}</p>
+              )}
             </div>
           </div>
         </div>

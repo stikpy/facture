@@ -2,7 +2,7 @@
 
 import { useState, useCallback } from 'react'
 import { useDropzone } from 'react-dropzone'
-import { createClient } from '@/lib/supabase-client'
+import { createClient } from '@/utils/supabase/client'
 import { Button } from '@/components/ui/button'
 import { LoadingSpinner } from '@/components/ui/loading-spinner'
 import { Upload, FileText, CheckCircle, AlertCircle } from 'lucide-react'
@@ -66,16 +66,20 @@ export function FileUpload() {
       
       console.log(`📤 [CLIENT] Envoi requête POST vers /api/upload pour ${fileData.file.name}`)
       
-      // Vérifier que l'utilisateur est connecté
+      // Vérifier que l'utilisateur est connecté et récupérer le token
       const supabase = createClient()
-      const { data: { user } } = await supabase.auth.getUser()
-
-      if (!user) {
-        console.error('❌ [CLIENT] Utilisateur non connecté')
+      
+      // Forcer la synchronisation des cookies avant de vérifier l'utilisateur
+      console.log('🔄 [CLIENT] Synchronisation des cookies...')
+      const { data: { session } } = await supabase.auth.getSession()
+      
+      if (!session) {
+        console.error('❌ [CLIENT] Aucune session trouvée')
         throw new Error('Vous devez être connecté pour uploader des fichiers')
       }
 
-      console.log('✅ [CLIENT] Utilisateur connecté:', user.email)
+      console.log('✅ [CLIENT] Utilisateur connecté:', session.user.email)
+      console.log('🔑 [CLIENT] Token JWT disponible:', session.access_token ? 'Oui' : 'Non')
 
       console.log('🌐 [CLIENT] Envoi de la requête fetch vers /api/upload...')
 
@@ -91,6 +95,9 @@ export function FileUpload() {
         response = await fetch('/api/upload', {
           method: 'POST',
           body: formData,
+          headers: {
+            'Authorization': `Bearer ${session.access_token}`
+          },
           credentials: 'include',
           signal: controller.signal
         })
@@ -125,7 +132,8 @@ export function FileUpload() {
       const processResponse = await fetch('/api/process', {
         method: 'POST',
         headers: {
-          'Content-Type': 'application/json'
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${session.access_token}`
         },
         body: JSON.stringify({
           fileId: result.fileId,

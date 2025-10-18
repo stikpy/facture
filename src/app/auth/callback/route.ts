@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createServerSupabaseClient } from '@/lib/supabase-server'
+import { createClient } from '@/utils/supabase/server'
 import type { Session } from '@supabase/supabase-js'
 
 interface AuthCallbackPayload {
@@ -14,7 +14,7 @@ export async function GET(request: NextRequest) {
   const next = requestUrl.searchParams.get('next') ?? '/'
 
   if (code) {
-    const supabase = await createServerSupabaseClient()
+    const supabase = await createClient()
     const { error } = await supabase.auth.exchangeCodeForSession(code)
     
     if (!error) {
@@ -29,7 +29,7 @@ export async function GET(request: NextRequest) {
 
 // Callback pour les événements d'authentification côté client
 export async function POST(request: Request) {
-  const supabase = await createServerSupabaseClient()
+  const supabase = await createClient()
   const { event, session }: AuthCallbackPayload = await request.json()
 
   if (session && (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED')) {

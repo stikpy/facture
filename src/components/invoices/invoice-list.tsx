@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { createClient } from '@/lib/supabase-client'
+import { createClient } from '@/utils/supabase/client'
 import { Button } from '@/components/ui/button'
 import { LoadingSpinner } from '@/components/ui/loading-spinner'
 import { formatCurrency, formatDate } from '@/lib/utils'
@@ -12,10 +12,11 @@ export function InvoiceList() {
   const [invoices, setInvoices] = useState<Invoice[]>([])
   const [loading, setLoading] = useState(true)
   const [filter, setFilter] = useState<'all' | 'completed' | 'processing' | 'error'>('all')
+  const [searchTerm, setSearchTerm] = useState('')
 
   useEffect(() => {
     fetchInvoices()
-  }, [filter])
+  }, [filter, searchTerm])
 
   const fetchInvoices = async () => {
     try {
@@ -33,9 +34,66 @@ export function InvoiceList() {
         query = query.eq('status', filter)
       }
 
-      const { data, error } = await query
+      // On récupère d'abord la liste, puis on filtre côté client (pour couvrir le JSON extrait)
+      let { data, error } = await query
 
       if (error) throw error
+
+      // Filtre complémentaire côté client (recherche texte + montants)
+      if (searchTerm.trim()) {
+        const term = searchTerm.trim().toLowerCase()
+        const maybeAmount = Number(term.replace(',', '.'))
+        const isAmount = !Number.isNaN(maybeAmount)
+
+        const normalizeAmountStrings = (n: number) => {
+          const s1 = n.toFixed(2) // 162.63
+          const s2 = s1.replace('.', ',') // 162,63
+          const s3 = String(Math.round(n)) // 163
+          const s4 = String(Math.floor(n)) // 162
+          const s5 = String(n) // raw
+          return [s1, s2, s3, s4, s5]
+        }
+
+        data = (data || []).filter((inv: any) => {
+          const ed = inv.extracted_data || {}
+          const items = Array.isArray(ed.items) ? ed.items : []
+
+          // Recherche texte: fichier, fournisseur, client, numéro, items.description
+          const hay = [
+            inv.file_name,
+            inv.mime_type,
+            ed.invoice_number,
+            ed.supplier_name,
+            ed.client_name,
+            ...items.map((it: any) => it?.description)
+          ]
+            .filter(Boolean)
+            .join(' ')
+            .toLowerCase()
+
+          const textMatch = hay.includes(term)
+
+          if (!isAmount) return textMatch
+
+          // Recherche montant: TTC/HT/TVA + items (unit/total)
+          const amountFields = [ed.total_amount, ed.subtotal, ed.tax_amount]
+            .filter((n: any) => typeof n === 'number') as number[]
+          const itemAmounts = items
+            .flatMap((it: any) => [it?.unit_price, it?.total_price])
+            .filter((n: any) => typeof n === 'number') as number[]
+          const allAmounts = [...amountFields, ...itemAmounts]
+
+          const amountMatch = allAmounts.some((n) => {
+            if (Math.abs(n - maybeAmount) < 0.01) return true // match précis
+            if (Math.floor(n) === Math.floor(maybeAmount)) return true // match entier
+            const tokens = normalizeAmountStrings(n)
+            return tokens.some((t) => t.includes(term))
+          })
+
+          return textMatch || amountMatch
+        })
+      }
+
       setInvoices(data || [])
     } catch (error) {
       console.error('Erreur lors du chargement des factures:', error)
@@ -48,6 +106,7 @@ export function InvoiceList() {
     if (!confirm('Êtes-vous sûr de vouloir supprimer cette facture ?')) return
 
     try {
+      const supabase = createClient()
       const { error } = await supabase
         .from('invoices')
         .delete()
@@ -59,6 +118,37 @@ export function InvoiceList() {
     } catch (error) {
       console.error('Erreur lors de la suppression:', error)
       alert('Erreur lors de la suppression')
+    }
+  }
+
+  const handleView = async (filePath: string) => {
+    try {
+      const supabase = createClient()
+      const { data } = supabase.storage.from('invoices').getPublicUrl(filePath)
+      const url = data.publicUrl
+      if (!url) throw new Error('URL introuvable')
+      window.open(url, '_blank', 'noopener,noreferrer')
+    } catch (error) {
+      console.error('Erreur ouverture facture:', error)
+      alert('Impossible d\'ouvrir la facture')
+    }
+  }
+
+  const handleDownload = async (filePath: string, fileName: string) => {
+    try {
+      const supabase = createClient()
+      const { data } = supabase.storage.from('invoices').getPublicUrl(filePath)
+      const url = data.publicUrl
+      if (!url) throw new Error('URL introuvable')
+      const a = document.createElement('a')
+      a.href = url
+      a.download = fileName
+      document.body.appendChild(a)
+      a.click()
+      a.remove()
+    } catch (error) {
+      console.error('Erreur téléchargement facture:', error)
+      alert('Impossible de télécharger la facture')
     }
   }
 
@@ -94,8 +184,17 @@ export function InvoiceList() {
 
   return (
     <div className="space-y-6">
-      {/* Filtres */}
-      <div className="flex space-x-2">
+      {/* Recherche + Filtres */}
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+        <div className="relative w-full sm:max-w-sm">
+          <input
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            placeholder="Rechercher (fichier, fournisseur, n° facture...)"
+            className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary"
+          />
+        </div>
+        <div className="flex space-x-2">
         {[
           { key: 'all', label: 'Toutes' },
           { key: 'completed', label: 'Terminées' },
@@ -111,6 +210,7 @@ export function InvoiceList() {
             {label}
           </Button>
         ))}
+        </div>
       </div>
 
       {/* Liste des factures */}
@@ -157,10 +257,10 @@ export function InvoiceList() {
                   <div className="flex items-center space-x-2">
                     {getStatusBadge(invoice.status)}
                     <div className="flex space-x-1">
-                      <Button variant="outline" size="sm">
+                      <Button variant="outline" size="sm" onClick={() => handleView(invoice.file_path)}>
                         <Eye className="h-4 w-4" />
                       </Button>
-                      <Button variant="outline" size="sm">
+                      <Button variant="outline" size="sm" onClick={() => handleDownload(invoice.file_path, invoice.file_name)}>
                         <Download className="h-4 w-4" />
                       </Button>
                       <Button

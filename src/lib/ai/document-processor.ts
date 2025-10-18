@@ -29,6 +29,36 @@ export class DocumentProcessor {
 
   async processDocument(text: string, fileName: string): Promise<ExtractedInvoiceData> {
     try {
+      const sanitizeToJson = (raw: any): any => {
+        // Normaliser la sortie du modèle vers une chaîne
+        let s = typeof raw === 'string'
+          ? raw
+          : typeof raw?.answer === 'string'
+            ? raw.answer
+            : typeof raw?.content === 'string'
+              ? raw.content
+              : String(raw ?? '')
+
+        // Retirer les fences de code ```json ... ``` si présents
+        const fenced = s.match(/```[a-zA-Z]*\n([\s\S]*?)```/)
+        if (fenced && fenced[1]) {
+          s = fenced[1]
+        }
+
+        s = s.trim()
+
+        // Si la chaîne ne commence/termine pas par des accolades, extraire le premier bloc JSON plausible
+        if (!(s.startsWith('{') && s.endsWith('}'))) {
+          const braceStart = s.indexOf('{')
+          const braceEnd = s.lastIndexOf('}')
+          if (braceStart !== -1 && braceEnd !== -1 && braceEnd > braceStart) {
+            s = s.substring(braceStart, braceEnd + 1)
+          }
+        }
+
+        return JSON.parse(s)
+      }
+
       // Diviser le document en chunks
       const splitter = new RecursiveCharacterTextSplitter({
         chunkSize: 1000,
@@ -99,8 +129,8 @@ export class DocumentProcessor {
         input: `Extrayez toutes les données de cette facture: ${fileName}`,
       })
       
-      // Parser le JSON retourné
-      const extractedData = JSON.parse(result.answer) as ExtractedInvoiceData
+      // Parser le JSON retourné (tolérant aux fences et au texte annexe)
+      const extractedData = sanitizeToJson(result) as ExtractedInvoiceData
       
       return extractedData
       
@@ -112,6 +142,22 @@ export class DocumentProcessor {
 
   async classifyInvoice(data: ExtractedInvoiceData): Promise<InvoiceClassification> {
     try {
+      const sanitizeToJson = (raw: any): any => {
+        let s = typeof raw === 'string'
+          ? raw
+          : typeof raw?.content === 'string'
+            ? raw.content
+            : String(raw ?? '')
+        const fenced = s.match(/```[a-zA-Z]*\n([\s\S]*?)```/)
+        if (fenced && fenced[1]) s = fenced[1]
+        s = s.trim()
+        if (!(s.startsWith('{') && s.endsWith('}'))) {
+          const b1 = s.indexOf('{'); const b2 = s.lastIndexOf('}')
+          if (b1 !== -1 && b2 !== -1 && b2 > b1) s = s.substring(b1, b2 + 1)
+        }
+        return JSON.parse(s)
+      }
+
       const prompt = ChatPromptTemplate.fromTemplate(`
         Analysez les données de facture suivantes et classifiez-les.
         
@@ -132,7 +178,7 @@ export class DocumentProcessor {
         data: JSON.stringify(data, null, 2),
       })
       
-      return JSON.parse(result.content as string) as InvoiceClassification
+      return sanitizeToJson(result) as InvoiceClassification
       
     } catch (error) {
       console.error('Erreur lors de la classification:', error)

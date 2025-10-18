@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createServerSupabaseClient } from '@/lib/supabase-server'
+import { createClient } from '@/utils/supabase/server'
+import { supabaseAdmin } from '@/lib/supabase'
 import { StorageService } from '@/lib/storage'
 import { DocumentProcessor } from '@/lib/ai/document-processor'
 import { OCRProcessor } from '@/lib/ai/ocr-processor'
@@ -9,20 +10,25 @@ export async function POST(request: NextRequest) {
   
   try {
     console.log('🔧 [SERVER] Création du client Supabase serveur')
-    const supabase = await createServerSupabaseClient()
+    const supabase = await createClient()
     
-    // Vérifier l'authentification
+    // Vérifier l'authentification (cookies puis Authorization Bearer)
     console.log('🔐 [SERVER] Vérification de l\'authentification')
-    const { data: { user }, error: authError } = await supabase.auth.getUser()
-    
-    if (authError) {
-      console.error('❌ [SERVER] Erreur d\'authentification:', authError)
-      return NextResponse.json({ error: 'Erreur d\'authentification: ' + authError.message }, { status: 401 })
-    }
+    let { data: { user }, error: authError } = await supabase.auth.getUser()
     
     if (!user) {
-      console.error('❌ [SERVER] Aucun utilisateur authentifié')
-      return NextResponse.json({ error: 'Non authentifié' }, { status: 401 })
+      const authHeader = request.headers.get('authorization')
+      if (authHeader) {
+        const token = authHeader.replace('Bearer ', '')
+        const authResult = await supabase.auth.getUser(token)
+        user = authResult.data.user
+        authError = authResult.error
+      }
+    }
+    
+    if (authError || !user) {
+      console.error('❌ [SERVER] Erreur d\'authentification:', authError)
+      return NextResponse.json({ error: 'Erreur d\'authentification: ' + (authError?.message || 'Auth session missing!') }, { status: 401 })
     }
     
     console.log(`✅ [SERVER] Utilisateur authentifié: ${user.email} (ID: ${user.id})`)
@@ -36,13 +42,12 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'ID de fichier requis' }, { status: 400 })
     }
 
-    // Récupérer la facture
+    // Récupérer la facture (bypass RLS, avec contrôle d'ownership)
     console.log(`🔍 [SERVER] Récupération de la facture avec l'ID: ${fileId}`)
-    const { data: invoice, error: invoiceError } = await supabase
+    const { data: invoice, error: invoiceError } = await supabaseAdmin
       .from('invoices')
       .select('*')
       .eq('id', fileId)
-      .eq('user_id', user.id)
       .single()
 
     if (invoiceError) {
@@ -54,12 +59,16 @@ export async function POST(request: NextRequest) {
       console.error('❌ [SERVER] Facture non trouvée')
       return NextResponse.json({ error: 'Facture non trouvée' }, { status: 404 })
     }
+    if (invoice.user_id !== user.id) {
+      console.error('❌ [SERVER] Accès interdit à la facture')
+      return NextResponse.json({ error: 'Accès interdit' }, { status: 403 })
+    }
     
     console.log(`✅ [SERVER] Facture trouvée: ${invoice.file_name} (${invoice.mime_type})`)
 
     // Mettre à jour le statut
     console.log('🔄 [SERVER] Mise à jour du statut vers "processing"')
-    await supabase
+    await supabaseAdmin
       .from('invoices')
       .update({ status: 'processing' })
       .eq('id', fileId)
@@ -106,7 +115,7 @@ export async function POST(request: NextRequest) {
 
       // Sauvegarder les données extraites
       console.log('💾 [SERVER] Sauvegarde des données extraites en base')
-      const { error: updateError } = await supabase
+      const { error: updateError } = await supabaseAdmin
         .from('invoices')
         .update({
           extracted_data: extractedData,
@@ -132,7 +141,7 @@ export async function POST(request: NextRequest) {
           total_price: item.total_price
         }))
 
-        await supabase
+        await supabaseAdmin
           .from('invoice_items')
           .insert(items)
         console.log('✅ [SERVER] Articles de facture créés')
@@ -152,7 +161,7 @@ export async function POST(request: NextRequest) {
       
       // Mettre à jour le statut d'erreur
       console.log('🔄 [SERVER] Mise à jour du statut vers "error"')
-      await supabase
+      await supabaseAdmin
         .from('invoices')
         .update({ 
           status: 'error',

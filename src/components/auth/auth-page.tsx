@@ -1,7 +1,7 @@
 'use client'
 
 import { useState } from 'react'
-import { createClient } from '@/lib/supabase-client'
+import { createClient } from '@/utils/supabase/client'
 import { Button } from '@/components/ui/button'
 import { LoadingSpinner } from '@/components/ui/loading-spinner'
 
@@ -83,8 +83,20 @@ export function AuthPage() {
         }
         
         console.log('✅ [AUTH] Connexion réussie')
-        // Rediriger vers le dashboard après connexion réussie
-        window.location.href = '/'
+        
+        // Vérifier que l'utilisateur est bien connecté avant de rediriger
+        const { data: { user: currentUser } } = await supabase.auth.getUser()
+        console.log('🔍 [AUTH] Utilisateur après connexion:', currentUser ? `${currentUser.email} (${currentUser.id})` : 'Non connecté')
+        
+        if (currentUser) {
+          console.log('🔄 [AUTH] Redirection vers le dashboard...')
+          // Rediriger vers le dashboard après connexion réussie
+          setTimeout(() => {
+            window.location.href = '/'
+          }, 1000)
+        } else {
+          console.error('❌ [AUTH] Utilisateur non connecté après connexion')
+        }
       }
     } catch (error) {
       console.error('❌ [AUTH] Erreur générale:', error)

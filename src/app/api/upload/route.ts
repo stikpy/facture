@@ -1,19 +1,27 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createServerSupabaseClient } from '@/lib/supabase-server'
+import { createClient } from '@/utils/supabase/server'
 import { StorageService } from '@/lib/storage'
+import { supabaseAdmin } from '@/lib/supabase'
 
 export async function POST(request: NextRequest) {
   console.log('🚀 [SERVER] Début de la requête POST /api/upload')
   
   try {
     console.log('🔧 [SERVER] Création du client Supabase serveur')
-    const supabase = await createServerSupabaseClient()
+    const supabase = await createClient()
 
     console.log('🔐 [SERVER] Vérification de l\'authentification via cookies')
+    
+    // Forcer la synchronisation des cookies côté serveur
+    console.log('🔄 [SERVER] Synchronisation des cookies côté serveur...')
+    await supabase.auth.getSession()
+    
     let {
       data: { user },
       error: authError,
     } = await supabase.auth.getUser()
+
+    console.log('🔍 [SERVER] Résultat getUser:', { user: user ? `${user.email} (${user.id})` : 'Aucun', error: authError?.message })
 
     if (!user) {
       console.log('🔄 [SERVER] Aucun utilisateur via cookies, tentative via Authorization header')
@@ -26,6 +34,7 @@ export async function POST(request: NextRequest) {
         const authResult = await supabase.auth.getUser(token)
         user = authResult.data.user
         authError = authResult.error
+        console.log('🔍 [SERVER] Résultat getUser avec token:', { user: user ? `${user.email} (${user.id})` : 'Aucun', error: authError?.message })
       }
     }
 
@@ -98,7 +107,8 @@ export async function POST(request: NextRequest) {
 
     // Enregistrer en base de données
     console.log('💾 [SERVER] Enregistrement en base de données')
-    const { data: invoice, error: dbError } = await supabase
+    // Utiliser le client service role pour bypass RLS après vérification de l'utilisateur
+    const { data: invoice, error: dbError } = await supabaseAdmin
       .from('invoices')
       .insert({
         user_id: user.id,

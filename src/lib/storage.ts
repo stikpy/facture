@@ -4,6 +4,26 @@ import { v4 as uuidv4 } from 'uuid'
 export class StorageService {
   private bucketName = 'invoices'
 
+  private async ensureBucketExists(): Promise<void> {
+    try {
+      // Vérifier si le bucket existe déjà
+      const { data: existingBucket, error: getBucketError } = await (supabaseAdmin as any).storage.getBucket?.(this.bucketName)
+
+      if (!existingBucket || getBucketError) {
+        // Certaines versions n'ont pas getBucket: on tente la création directement
+        const { error: createError } = await supabaseAdmin.storage.createBucket(this.bucketName, {
+          public: true,
+        })
+        if (createError && !/already exists/i.test(createError.message)) {
+          throw createError
+        }
+      }
+    } catch (error) {
+      console.error('Erreur lors de la vérification/création du bucket:', error)
+      // On ne bloque pas ici car l'erreur détaillée remontera à l'upload si le bucket n'existe pas
+    }
+  }
+
   async uploadFile(
     file: Buffer,
     fileName: string,
@@ -11,6 +31,9 @@ export class StorageService {
     userId: string
   ): Promise<{ path: string; url: string }> {
     try {
+      // S'assurer que le bucket existe
+      await this.ensureBucketExists()
+
       const fileId = uuidv4()
       const fileExtension = fileName.split('.').pop()
       const filePath = `${userId}/${fileId}.${fileExtension}`

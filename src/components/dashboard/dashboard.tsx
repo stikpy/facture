@@ -2,12 +2,13 @@
 
 import { useState } from 'react'
 import { useAuth } from '@/app/providers'
-import { createClient } from '@/lib/supabase-client'
+import { createClient } from '@/utils/supabase/client'
 import { Button } from '@/components/ui/button'
 import { FileUpload } from '@/components/upload/file-upload'
 import { InvoiceList } from '@/components/invoices/invoice-list'
 import { StatsCards } from '@/components/dashboard/stats-cards'
 import { Upload, FileText, LogOut } from 'lucide-react'
+import Link from 'next/link'
 
 export function Dashboard() {
   const { user } = useAuth()
@@ -29,6 +30,9 @@ export function Dashboard() {
               <h1 className="ml-2 text-xl font-semibold text-gray-900">
                 Facture AI
               </h1>
+              <Link href="/invoices" className="ml-4 text-sm text-primary hover:underline">
+                Ouvrir la page Mes factures
+              </Link>
             </div>
             <div className="flex items-center space-x-4">
               <span className="text-sm text-gray-700">
