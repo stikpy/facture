@@ -1,8 +1,6 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  experimental: {
-    serverComponentsExternalPackages: ['sharp', 'pdf-parse', 'tesseract.js']
-  },
+  serverExternalPackages: ['sharp', 'pdf-parse', 'tesseract.js'],
   images: {
     domains: ['localhost'],
     formats: ['image/webp', 'image/avif']

@@ -2,7 +2,7 @@
 
 import { useState, useCallback } from 'react'
 import { useDropzone } from 'react-dropzone'
-import { createClientComponentClient } from '@supabase/auth-helpers-nextjs'
+import { createClient } from '@/lib/supabase-client'
 import { Button } from '@/components/ui/button'
 import { LoadingSpinner } from '@/components/ui/loading-spinner'
 import { Upload, FileText, CheckCircle, AlertCircle } from 'lucide-react'
@@ -19,9 +19,11 @@ interface UploadedFile {
 export function FileUpload() {
   const [files, setFiles] = useState<UploadedFile[]>([])
   const [isUploading, setIsUploading] = useState(false)
-  const supabase = createClientComponentClient()
 
   const onDrop = useCallback(async (acceptedFiles: File[]) => {
+    console.log('🎯 [CLIENT] ===== FONCTION onDrop APPELÉE =====')
+    console.log('🎯 [CLIENT] Nombre de fichiers:', acceptedFiles.length)
+    console.log('🚀 [CLIENT] Début du processus d\'upload:', acceptedFiles.map(f => ({ name: f.name, size: f.size, type: f.type })))
     setIsUploading(true)
     
     const newFiles: UploadedFile[] = acceptedFiles.map(file => ({
@@ -36,36 +38,111 @@ export function FileUpload() {
     // Traiter chaque fichier
     for (const fileData of newFiles) {
       try {
+        console.log(`📤 [CLIENT] Début traitement pour: ${fileData.file.name} (ID: ${fileData.id})`)
         await uploadAndProcessFile(fileData)
       } catch (error) {
-        console.error('Erreur upload:', error)
+        console.error(`❌ [CLIENT] Erreur upload pour ${fileData.file.name}:`, error)
         updateFileStatus(fileData.id, 'error', 0, (error as Error).message)
       }
     }
 
+    console.log('🏁 [CLIENT] Tous les uploads terminés')
     setIsUploading(false)
-  }, [supabase])
+  }, [])
 
   const uploadAndProcessFile = async (fileData: UploadedFile) => {
     try {
+      console.log('🚀 [CLIENT] ===== DÉBUT UPLOAD =====')
+      console.log(`📁 [CLIENT] Fichier: ${fileData.file.name}`)
+      console.log(`📁 [CLIENT] Taille: ${fileData.file.size} bytes`)
+      console.log(`📁 [CLIENT] Type: ${fileData.file.type}`)
+      
       // 1. Upload du fichier
+      console.log(`📡 [CLIENT] Début upload pour ${fileData.file.name}`)
       updateFileStatus(fileData.id, 'uploading', 25)
       
       const formData = new FormData()
       formData.append('file', fileData.file)
       
-      const response = await fetch('/api/upload', {
-        method: 'POST',
-        body: formData
-      })
+      console.log(`📤 [CLIENT] Envoi requête POST vers /api/upload pour ${fileData.file.name}`)
+      
+      // Vérifier que l'utilisateur est connecté
+      const supabase = createClient()
+      const { data: { user } } = await supabase.auth.getUser()
+      
+      if (!user) {
+        console.error('❌ [CLIENT] Utilisateur non connecté')
+        throw new Error('Vous devez être connecté pour uploader des fichiers')
+      }
+      
+      console.log('✅ [CLIENT] Utilisateur connecté:', user.email)
+      
+      // Récupérer le token d'authentification
+      console.log('🔍 [CLIENT] Récupération de la session...')
+      const { data: { session }, error: sessionError } = await supabase.auth.getSession()
+      console.log('📋 [CLIENT] Session récupérée:', session ? 'Présente' : 'Absente')
+      console.log('❌ [CLIENT] Erreur session:', sessionError)
+      
+      const token = session?.access_token
+      console.log('🔑 [CLIENT] Token extrait:', token ? 'Présent' : 'Absent')
+      
+      if (!token) {
+        console.error('❌ [CLIENT] Aucun token d\'authentification trouvé')
+        console.error('❌ [CLIENT] Session complète:', session)
+        throw new Error('Session expirée, veuillez vous reconnecter')
+      }
+      
+      console.log('🔑 [CLIENT] Token d\'authentification trouvé:', token.substring(0, 20) + '...')
+      console.log('🔍 [CLIENT] Token complet:', token)
+      console.log('🔍 [CLIENT] Type du token:', typeof token)
+      console.log('🔍 [CLIENT] Longueur du token:', token?.length)
+      
+      console.log('🌐 [CLIENT] Envoi de la requête fetch vers /api/upload...')
+      console.log('🌐 [CLIENT] Headers à envoyer:', { 'Authorization': `Bearer ${token}` })
+      
+      // Ajouter un timeout pour éviter que la requête se bloque
+      const controller = new AbortController()
+      const timeoutId = setTimeout(() => {
+        console.log('⏰ [CLIENT] Timeout de la requête fetch (30s)')
+        controller.abort()
+      }, 30000)
+      
+      let response
+      try {
+        response = await fetch('/api/upload', {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${token}`
+          },
+          body: formData,
+          signal: controller.signal
+        })
+        clearTimeout(timeoutId)
+        console.log('📡 [CLIENT] Requête fetch terminée, traitement de la réponse...')
+      } catch (error) {
+        clearTimeout(timeoutId)
+        if (error.name === 'AbortError') {
+          console.error('⏰ [CLIENT] Requête fetch annulée par timeout')
+          throw new Error('La requête a pris trop de temps (timeout)')
+        } else {
+          console.error('❌ [CLIENT] Erreur fetch:', error)
+          throw error
+        }
+      }
+
+      console.log(`📊 [CLIENT] Réponse upload: ${response.status} ${response.statusText}`)
 
       if (!response.ok) {
-        throw new Error('Erreur lors de l\'upload')
+        const errorText = await response.text()
+        console.error(`❌ [CLIENT] Erreur upload ${response.status}:`, errorText)
+        throw new Error(`Erreur lors de l'upload: ${response.status} ${response.statusText}`)
       }
 
       const result = await response.json()
+      console.log(`✅ [CLIENT] Upload réussi pour ${fileData.file.name}:`, result)
       
       // 2. Traitement du fichier
+      console.log(`🔄 [CLIENT] Début traitement IA pour ${fileData.file.name}`)
       updateFileStatus(fileData.id, 'processing', 50)
       
       const processResponse = await fetch('/api/process', {
@@ -79,13 +156,19 @@ export function FileUpload() {
         })
       })
 
+      console.log(`📊 [CLIENT] Réponse traitement: ${processResponse.status} ${processResponse.statusText}`)
+
       if (!processResponse.ok) {
-        throw new Error('Erreur lors du traitement')
+        const errorText = await processResponse.text()
+        console.error(`❌ [CLIENT] Erreur traitement ${processResponse.status}:`, errorText)
+        throw new Error(`Erreur lors du traitement: ${processResponse.status} ${processResponse.statusText}`)
       }
 
+      console.log(`✅ [CLIENT] Traitement terminé pour ${fileData.file.name}`)
       updateFileStatus(fileData.id, 'completed', 100)
       
     } catch (error) {
+      console.error(`❌ [CLIENT] Erreur dans uploadAndProcessFile pour ${fileData.file.name}:`, error)
       updateFileStatus(fileData.id, 'error', 0, (error as Error).message)
     }
   }

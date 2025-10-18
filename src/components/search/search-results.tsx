@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { createClientComponentClient } from '@supabase/auth-helpers-nextjs'
+import { createClient } from '@/lib/supabase-client'
 import { SearchBar } from './search-bar'
 import { LoadingSpinner } from '@/components/ui/loading-spinner'
 import { formatCurrency, formatDate } from '@/lib/utils'
@@ -18,7 +18,6 @@ export function SearchResults() {
   const [results, setResults] = useState<SearchResult[]>([])
   const [loading, setLoading] = useState(false)
   const [query, setQuery] = useState('')
-  const supabase = createClientComponentClient()
 
   const handleSearch = async (searchQuery: string) => {
     if (!searchQuery.trim()) {

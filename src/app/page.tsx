@@ -1,3 +1,5 @@
+'use client'
+
 import { useAuth } from './providers'
 import { AuthPage } from '@/components/auth/auth-page'
 import { Dashboard } from '@/components/dashboard/dashboard'

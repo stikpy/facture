@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { createClientComponentClient } from '@supabase/auth-helpers-nextjs'
+import { createClient } from '@/lib/supabase-client'
 import { Button } from '@/components/ui/button'
 import { LoadingSpinner } from '@/components/ui/loading-spinner'
 import { formatCurrency, formatDate } from '@/lib/utils'
@@ -12,7 +12,6 @@ export function InvoiceList() {
   const [invoices, setInvoices] = useState<Invoice[]>([])
   const [loading, setLoading] = useState(true)
   const [filter, setFilter] = useState<'all' | 'completed' | 'processing' | 'error'>('all')
-  const supabase = createClientComponentClient()
 
   useEffect(() => {
     fetchInvoices()
@@ -20,6 +19,7 @@ export function InvoiceList() {
 
   const fetchInvoices = async () => {
     try {
+      const supabase = createClient()
       const { data: { user } } = await supabase.auth.getUser()
       if (!user) return
 

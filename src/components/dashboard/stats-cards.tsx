@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { createClientComponentClient } from '@supabase/auth-helpers-nextjs'
+import { createClient } from '@/lib/supabase-client'
 import { FileText, CheckCircle, Clock, AlertCircle } from 'lucide-react'
 
 interface Stats {
@@ -14,9 +14,10 @@ interface Stats {
 export function StatsCards() {
   const [stats, setStats] = useState<Stats>({ total: 0, completed: 0, processing: 0, error: 0 })
   const [loading, setLoading] = useState(true)
-  const supabase = createClientComponentClient()
 
   useEffect(() => {
+    const supabase = createClient()
+    
     const fetchStats = async () => {
       try {
         const { data: { user } } = await supabase.auth.getUser()
@@ -44,7 +45,7 @@ export function StatsCards() {
     }
 
     fetchStats()
-  }, [supabase])
+  }, [])
 
   if (loading) {
     return (

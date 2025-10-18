@@ -6,8 +6,8 @@ import { Providers } from './providers'
 const inter = Inter({ subsets: ['latin'] })
 
 export const metadata: Metadata = {
-  title: 'Facture AI - Traitement intelligent de factures',
-  description: 'Solution alternative à Yooz pour la classification, l\'archivage et l\'extraction de données de factures avec IA',
+  title: 'Facture AI - Alternative à Yooz',
+  description: 'Solution IA pour le traitement intelligent de factures',
 }
 
 export default function RootLayout({

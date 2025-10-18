@@ -2,7 +2,7 @@
 
 import { useState } from 'react'
 import { useAuth } from '@/app/providers'
-import { createClientComponentClient } from '@supabase/auth-helpers-nextjs'
+import { createClient } from '@/lib/supabase-client'
 import { Button } from '@/components/ui/button'
 import { FileUpload } from '@/components/upload/file-upload'
 import { InvoiceList } from '@/components/invoices/invoice-list'
@@ -12,9 +12,9 @@ import { Upload, FileText, LogOut } from 'lucide-react'
 export function Dashboard() {
   const { user } = useAuth()
   const [activeTab, setActiveTab] = useState<'upload' | 'invoices'>('upload')
-  const supabase = createClientComponentClient()
 
   const handleSignOut = async () => {
+    const supabase = createClient()
     await supabase.auth.signOut()
   }
 
