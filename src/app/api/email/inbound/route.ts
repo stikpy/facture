@@ -27,11 +27,22 @@ async function verifyResendSignature(req: NextRequest, rawBody: string) {
   return timingSafeEqual(expected, header)
 }
 
-function extractUserIdFromRecipients(to: any[]): string | null {
+async function findUserIdForRecipients(to: any[]): Promise<string | null> {
   const all = (to || []).map((t) => (typeof t === 'string' ? t : t?.address || '') as string)
+  // 1) plus addressing factures+<userId>@
   for (const addr of all) {
     const m = addr.match(/factures\+([0-9a-f\-]{36})@/i)
     if (m) return m[1]
+  }
+  // 2) alias direct local-part → inbound_aliases
+  const local = all.map((a) => a.split('@')[0]).find(Boolean)
+  if (local) {
+    const { data } = await (supabaseAdmin as any)
+      .from('inbound_aliases')
+      .select('user_id')
+      .eq('alias', local.toLowerCase())
+      .single()
+    if (data?.user_id) return data.user_id
   }
   return null
 }
@@ -46,7 +57,7 @@ export async function POST(request: NextRequest) {
 
     const payload = JSON.parse(raw)
     const to = payload?.to || payload?.recipients || []
-    const userId = extractUserIdFromRecipients(to)
+    const userId = await findUserIdForRecipients(to)
 
     if (!userId) {
       return NextResponse.json({ error: 'Destinataire invalide (utiliser factures+<userId>@gk-dev.tech)' }, { status: 400 })
