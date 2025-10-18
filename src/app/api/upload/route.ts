@@ -23,7 +23,9 @@ export async function POST(request: NextRequest) {
       if (authHeader) {
         const token = authHeader.replace('Bearer ', '')
         console.log('🔑 [SERVER] Token JWT extrait:', token.substring(0, 20) + '...')
-        ({ data: { user }, error: authError } = await supabase.auth.getUser(token))
+        const authResult = await supabase.auth.getUser(token)
+        user = authResult.data.user
+        authError = authResult.error
       }
     }
 
