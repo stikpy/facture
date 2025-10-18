@@ -120,9 +120,28 @@ export async function GET(request: NextRequest) {
 
     // Par fournisseur (top 10)
     const bySupplierMap = new Map<string, Totals>()
-    for (const r of filtered) {
-      const ed = (r as any).extracted_data || {}
-      const key = String(ed.supplier_name || 'Inconnu')
+    const supplierDisplay = new Map<string, string>()
+
+    const normalizeSupplier = (name: string) => {
+      const stopwords = /(\b(sas|sasu|sarl|sa|eurl|spa|ltd|inc|societe|maison|ste|ets|etablissement|les|des|du|de|la|le|l)\b)/gi
+      return String(name || '')
+        .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, ' ')
+        .replace(stopwords, ' ')
+        .replace(/\s+/g, ' ')
+        .trim()
+    }
+
+    for (const r of filtered as any[]) {
+      const ed = r.extracted_data || {}
+      const hasSupplierId = !!r.supplier_id
+      const key = hasSupplierId ? `id:${r.supplier_id}` : `nk:${normalizeSupplier(ed.supplier_name || 'Inconnu')}`
+
+      if (!supplierDisplay.has(key)) {
+        supplierDisplay.set(key, ed.supplier_name || 'Inconnu')
+      }
+
       const cur = bySupplierMap.get(key) || { total: 0, ht: 0, tva: 0, count: 0 }
       cur.total += toNum(ed.total_amount)
       cur.ht += toNum(ed.subtotal)
@@ -130,8 +149,9 @@ export async function GET(request: NextRequest) {
       cur.count += 1
       bySupplierMap.set(key, cur)
     }
+
     const bySupplier = Array.from(bySupplierMap.entries())
-      .map(([supplier, v]) => ({ supplier, ...v }))
+      .map(([key, v]) => ({ supplier: supplierDisplay.get(key) || key, ...v }))
       .sort((a, b) => b.total - a.total)
       .slice(0, 10)
 

@@ -4,6 +4,7 @@ import { supabaseAdmin } from '@/lib/supabase'
 import { StorageService } from '@/lib/storage'
 import { DocumentProcessor } from '@/lib/ai/document-processor'
 import { OCRProcessor } from '@/lib/ai/ocr-processor'
+import { upsertSupplier } from '@/lib/suppliers'
 
 export async function POST(request: NextRequest) {
   console.log('🚀 [SERVER] Début de la requête POST /api/process')
@@ -112,6 +113,20 @@ export async function POST(request: NextRequest) {
       
       const classification = await documentProcessor.classifyInvoice(extractedData)
       console.log('✅ [SERVER] Classification:', classification)
+
+      // Upsert supplier
+      try {
+        const supplierName = (extractedData as any)?.supplier_name
+        if (supplierName) {
+          const supplier = await upsertSupplier(String(supplierName))
+          if (supplier) {
+            await (supabaseAdmin as any)
+              .from('invoices')
+              .update({ supplier_id: supplier.id } as any)
+              .eq('id', fileId)
+          }
+        }
+      } catch (e) { console.error('Supplier upsert error:', e) }
 
       // Sauvegarder les données extraites
       console.log('💾 [SERVER] Sauvegarde des données extraites en base')
