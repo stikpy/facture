@@ -18,21 +18,38 @@ export function AuthPage() {
     e.preventDefault()
     setIsLoading(true)
 
+    console.log('🔐 [AUTH] Début de l\'authentification')
+    console.log('📧 [AUTH] Email:', email)
+    console.log('🔗 [AUTH] Magic link activé:', useMagicLink)
+    console.log('📝 [AUTH] Inscription:', isSignUp)
+
     try {
       const supabase = createClient()
+      console.log('✅ [AUTH] Client Supabase créé')
       
       if (useMagicLink) {
-        // Connexion par magic link
-        const { error } = await supabase.auth.signInWithOtp({
+        console.log('🔗 [AUTH] Tentative de connexion par magic link')
+        console.log('🌐 [AUTH] URL de redirection:', `${window.location.origin}/auth/callback`)
+        
+        const { data, error } = await supabase.auth.signInWithOtp({
           email,
           options: {
             emailRedirectTo: `${window.location.origin}/auth/callback`
           }
         })
-        if (error) throw error
+        
+        console.log('📤 [AUTH] Réponse magic link:', { data, error })
+        
+        if (error) {
+          console.error('❌ [AUTH] Erreur magic link:', error)
+          throw error
+        }
+        
+        console.log('✅ [AUTH] Magic link envoyé avec succès')
         setMagicLinkSent(true)
       } else if (isSignUp) {
-        const { error } = await supabase.auth.signUp({
+        console.log('📝 [AUTH] Tentative d\'inscription')
+        const { data, error } = await supabase.auth.signUp({
           email,
           password,
           options: {
@@ -41,18 +58,40 @@ export function AuthPage() {
             }
           }
         })
-        if (error) throw error
+        
+        console.log('📤 [AUTH] Réponse inscription:', { data, error })
+        
+        if (error) {
+          console.error('❌ [AUTH] Erreur inscription:', error)
+          throw error
+        }
+        
+        console.log('✅ [AUTH] Inscription réussie, vérifiez votre email')
         alert('Vérifiez votre email pour confirmer votre compte')
       } else {
-        const { error } = await supabase.auth.signInWithPassword({
+        console.log('🔑 [AUTH] Tentative de connexion par mot de passe')
+        const { data, error } = await supabase.auth.signInWithPassword({
           email,
           password,
         })
-        if (error) throw error
+        
+        console.log('📤 [AUTH] Réponse connexion:', { data, error })
+        
+        if (error) {
+          console.error('❌ [AUTH] Erreur connexion:', error)
+          throw error
+        }
+        
+        console.log('✅ [AUTH] Connexion réussie')
       }
     } catch (error) {
+      console.error('❌ [AUTH] Erreur générale:', error)
+      console.error('❌ [AUTH] Type d\'erreur:', typeof error)
+      console.error('❌ [AUTH] Message d\'erreur:', (error as Error).message)
+      console.error('❌ [AUTH] Stack trace:', (error as Error).stack)
       alert('Erreur: ' + (error as Error).message)
     } finally {
+      console.log('🏁 [AUTH] Fin du processus d\'authentification')
       setIsLoading(false)
     }
   }
