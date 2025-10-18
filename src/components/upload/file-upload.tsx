@@ -125,37 +125,86 @@ export function FileUpload() {
       const result = await response.json()
       console.log(`✅ [CLIENT] Upload réussi pour ${fileData.file.name}:`, result)
       
-      // 2. Traitement du fichier
-      console.log(`🔄 [CLIENT] Début traitement IA pour ${fileData.file.name}`)
+      // 2. Ajouter à la queue de traitement
+      console.log(`📋 [CLIENT] Ajout à la queue pour ${fileData.file.name}`)
       updateFileStatus(fileData.id, 'processing', 50)
       
-      const processResponse = await fetch('/api/process', {
+      const queueResponse = await fetch('/api/queue/add', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${session.access_token}`
         },
         body: JSON.stringify({
-          fileId: result.fileId,
-          fileName: fileData.file.name
+          invoiceId: result.fileId
         })
       })
 
-      console.log(`📊 [CLIENT] Réponse traitement: ${processResponse.status} ${processResponse.statusText}`)
-
-      if (!processResponse.ok) {
-        const errorText = await processResponse.text()
-        console.error(`❌ [CLIENT] Erreur traitement ${processResponse.status}:`, errorText)
-        throw new Error(`Erreur lors du traitement: ${processResponse.status} ${processResponse.statusText}`)
+      if (!queueResponse.ok) {
+        const errorData = await queueResponse.json()
+        throw new Error(errorData.error || 'Erreur lors de l\'ajout à la queue')
       }
 
-      console.log(`✅ [CLIENT] Traitement terminé pour ${fileData.file.name}`)
-      updateFileStatus(fileData.id, 'completed', 100)
+      const queueResult = await queueResponse.json()
+      console.log(`✅ [CLIENT] Ajouté à la queue pour ${fileData.file.name}:`, queueResult)
+      
+      // 3. Polling pour suivre le statut
+      await pollProcessingStatus(result.fileId, fileData.id, session.access_token)
       
     } catch (error) {
       console.error(`❌ [CLIENT] Erreur dans uploadAndProcessFile pour ${fileData.file.name}:`, error)
       updateFileStatus(fileData.id, 'error', 0, (error as Error).message)
     }
+  }
+
+  const pollProcessingStatus = async (invoiceId: string, fileId: string, token: string) => {
+    const maxAttempts = 60 // 5 minutes max (5s * 60)
+    let attempts = 0
+
+    const poll = async (): Promise<void> => {
+      if (attempts >= maxAttempts) {
+        updateFileStatus(fileId, 'error', 0, 'Timeout: le traitement prend trop de temps')
+        return
+      }
+
+      attempts++
+
+      try {
+        const statusResponse = await fetch(`/api/queue/status?invoiceId=${invoiceId}`, {
+          headers: {
+            'Authorization': `Bearer ${token}`
+          }
+        })
+
+        if (!statusResponse.ok) {
+          throw new Error('Erreur lors de la récupération du statut')
+        }
+
+        const statusData = await statusResponse.json()
+        console.log(`📊 [CLIENT] Statut queue:`, statusData)
+
+        if (statusData.status === 'completed') {
+          updateFileStatus(fileId, 'completed', 100)
+          return
+        } else if (statusData.status === 'failed' || statusData.status === 'error') {
+          updateFileStatus(fileId, 'error', 0, statusData.errorMessage || 'Erreur lors du traitement')
+          return
+        } else if (statusData.status === 'processing') {
+          updateFileStatus(fileId, 'processing', 75)
+        } else {
+          // pending
+          updateFileStatus(fileId, 'processing', 60)
+        }
+
+        // Continuer le polling
+        setTimeout(poll, 5000) // Vérifier toutes les 5 secondes
+      } catch (error) {
+        console.error('❌ [CLIENT] Erreur polling:', error)
+        updateFileStatus(fileId, 'error', 0, (error as Error).message)
+      }
+    }
+
+    await poll()
   }
 
   const updateFileStatus = (id: string, status: UploadedFile['status'], progress: number, error?: string) => {

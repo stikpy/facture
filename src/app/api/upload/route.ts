@@ -108,18 +108,20 @@ export async function POST(request: NextRequest) {
     // Enregistrer en base de données
     console.log('💾 [SERVER] Enregistrement en base de données')
     // Utiliser le client service role pour bypass RLS après vérification de l'utilisateur
-    const { data: invoice, error: dbError } = await supabaseAdmin
+    const { data: invoice, error: dbError } = await ((supabaseAdmin as any)
       .from('invoices')
-      .insert({
-        user_id: user.id,
-        file_name: file.name,
-        file_path: path,
-        file_size: file.size,
-        mime_type: file.type,
-        status: 'pending'
-      })
+      .insert([
+        {
+          user_id: user.id,
+          file_name: file.name,
+          file_path: path,
+          file_size: file.size,
+          mime_type: file.type,
+          status: 'pending' as const,
+        },
+      ])
       .select()
-      .single()
+      .single())
 
     if (dbError) {
       console.error('❌ [SERVER] Erreur base de données:', dbError)

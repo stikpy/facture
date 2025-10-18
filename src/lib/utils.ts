@@ -13,11 +13,12 @@ export function formatCurrency(amount: number, currency: string = 'EUR'): string
 }
 
 export function formatDate(date: string | Date): string {
-  return new Intl.DateTimeFormat('fr-FR', {
-    year: 'numeric',
-    month: 'long',
-    day: 'numeric',
-  }).format(new Date(date))
+  const d = new Date(date)
+  if (isNaN(d.getTime())) return ''
+  const dd = String(d.getDate()).padStart(2, '0')
+  const mm = String(d.getMonth() + 1).padStart(2, '0')
+  const yy = String(d.getFullYear()).slice(-2)
+  return `${dd}/${mm}/${yy}`
 }
 
 export function formatFileSize(bytes: number): string {

@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button'
 import { LoadingSpinner } from '@/components/ui/loading-spinner'
 import { formatCurrency, formatDate } from '@/lib/utils'
 import { FileText, Download, Eye, Trash2 } from 'lucide-react'
+import Link from 'next/link'
 import type { Invoice } from '@/types/database'
 
 export function InvoiceList() {
@@ -13,6 +14,22 @@ export function InvoiceList() {
   const [loading, setLoading] = useState(true)
   const [filter, setFilter] = useState<'all' | 'completed' | 'processing' | 'error'>('all')
   const [searchTerm, setSearchTerm] = useState('')
+  const [selected, setSelected] = useState<Record<string, boolean>>({})
+
+  const formatShortDate = (iso?: string) => {
+    if (!iso) return '—'
+    const d = new Date(iso)
+    if (isNaN(d.getTime())) return '—'
+    const dd = String(d.getDate()).padStart(2, '0')
+    const mm = String(d.getMonth() + 1).padStart(2, '0')
+    const yy = String(d.getFullYear()).slice(-2)
+    return `${dd}/${mm}/${yy}`
+  }
+
+  const truncate = (value: string | undefined | null, max: number): string => {
+    if (!value) return '—'
+    return value.length > max ? value.slice(0, max - 3) + '...' : value
+  }
 
   useEffect(() => {
     fetchInvoices()
@@ -182,101 +199,115 @@ export function InvoiceList() {
     )
   }
 
+  const toggleAll = (checked: boolean) => {
+    const next: Record<string, boolean> = {}
+    invoices.forEach((i) => (next[i.id] = checked))
+    setSelected(next)
+  }
+
   return (
-    <div className="space-y-6">
-      {/* Recherche + Filtres */}
+    <div className="space-y-4">
+      {/* Barre d'actions / Recherche */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <div className="relative w-full sm:max-w-sm">
           <input
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
-            placeholder="Rechercher (fichier, fournisseur, n° facture...)"
+            placeholder="Rechercher (fichier, fournisseur, n° facture, montant…)"
             className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary"
           />
         </div>
-        <div className="flex space-x-2">
-        {[
-          { key: 'all', label: 'Toutes' },
-          { key: 'completed', label: 'Terminées' },
-          { key: 'processing', label: 'En cours' },
-          { key: 'error', label: 'Erreurs' }
-        ].map(({ key, label }) => (
-          <Button
-            key={key}
-            variant={filter === key ? 'default' : 'outline'}
-            size="sm"
-            onClick={() => setFilter(key as any)}
-          >
-            {label}
-          </Button>
-        ))}
+        <div className="flex items-center space-x-2">
+          {[
+            { key: 'all', label: 'Toutes' },
+            { key: 'completed', label: 'Terminées' },
+            { key: 'processing', label: 'En cours' },
+            { key: 'error', label: 'Erreurs' }
+          ].map(({ key, label }) => (
+            <Button
+              key={key}
+              variant={filter === key ? 'default' : 'outline'}
+              size="sm"
+              onClick={() => setFilter(key as any)}
+            >
+              {label}
+            </Button>
+          ))}
         </div>
       </div>
 
-      {/* Liste des factures */}
+      {/* Tableau façon Yooz */}
       {invoices.length === 0 ? (
         <div className="text-center py-12">
           <FileText className="mx-auto h-12 w-12 text-gray-400" />
-          <h3 className="mt-2 text-sm font-medium text-gray-900">
-            Aucune facture
-          </h3>
-          <p className="mt-1 text-sm text-gray-500">
-            Commencez par uploader vos premières factures.
-          </p>
+          <h3 className="mt-2 text-sm font-medium text-gray-900">Aucune facture</h3>
+          <p className="mt-1 text-sm text-gray-500">Commencez par uploader vos premières factures.</p>
         </div>
       ) : (
-        <div className="bg-white shadow overflow-hidden sm:rounded-md">
-          <ul className="divide-y divide-gray-200">
-            {invoices.map((invoice) => (
-              <li key={invoice.id} className="px-6 py-4">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center space-x-4">
-                    <FileText className="h-8 w-8 text-gray-400" />
-                    <div>
-                      <p className="text-sm font-medium text-gray-900">
-                        {invoice.file_name}
-                      </p>
-                      <p className="text-sm text-gray-500">
-                        {formatDate(invoice.created_at)}
-                      </p>
-                      {invoice.extracted_data && (
-                        <p className="text-sm text-gray-600">
-                          {invoice.extracted_data.supplier_name && (
-                            <span>Fournisseur: {invoice.extracted_data.supplier_name}</span>
-                          )}
-                          {invoice.extracted_data.total_amount && (
-                            <span className="ml-4">
-                              Total: {formatCurrency(invoice.extracted_data.total_amount)}
-                            </span>
-                          )}
-                        </p>
-                      )}
-                    </div>
-                  </div>
-                  
-                  <div className="flex items-center space-x-2">
-                    {getStatusBadge(invoice.status)}
-                    <div className="flex space-x-1">
-                      <Button variant="outline" size="sm" onClick={() => handleView(invoice.file_path)}>
-                        <Eye className="h-4 w-4" />
-                      </Button>
-                      <Button variant="outline" size="sm" onClick={() => handleDownload(invoice.file_path, invoice.file_name)}>
-                        <Download className="h-4 w-4" />
-                      </Button>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => handleDelete(invoice.id)}
-                        className="text-red-600 hover:text-red-700"
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </Button>
-                    </div>
-                  </div>
-                </div>
-              </li>
-            ))}
-          </ul>
+        <div className="overflow-auto border rounded-md bg-white">
+          <table className="min-w-full text-xs">
+            <thead className="bg-gray-50">
+              <tr>
+                <th className="px-2 py-1"><input type="checkbox" onChange={(e) => toggleAll(e.target.checked)} /></th>
+                <th className="px-2 py-1 text-left">Rang</th>
+                <th className="px-2 py-1 text-left w-[420px]">Nom</th>
+                <th className="px-2 py-1 text-left w-[260px]">Fournisseur</th>
+                <th className="px-2 py-1 text-left">Date document</th>
+                <th className="px-2 py-1 text-right">Montant de base</th>
+                <th className="px-2 py-1 text-right">Montant total</th>
+                <th className="px-2 py-1 text-left">Devise</th>
+                <th className="px-2 py-1 text-left">Statut</th>
+                <th className="px-2 py-1 text-left">Créé le</th>
+                <th className="px-2 py-1 text-right">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {invoices.map((inv, idx) => {
+                const ed: any = inv.extracted_data || {}
+                const fileNameDisplay = truncate(inv.file_name, 40)
+                const supplierDisplay = truncate(String(ed.supplier_name || ''), 30)
+                const invoiceNumberDisplay = truncate(String(ed.invoice_number || ''), 20)
+                return (
+                  <tr key={inv.id} className="border-t">
+                    <td className="px-2 py-1"><input type="checkbox" checked={!!selected[inv.id]} onChange={(e) => setSelected({ ...selected, [inv.id]: e.target.checked })} /></td>
+                    <td className="px-2 py-1">{idx + 1}</td>
+                    <td className="px-2 py-1 w-[420px]">
+                      <div className="flex items-center space-x-1.5">
+                        <FileText className="h-3 w-3 text-gray-400" />
+                        <Link href={`/invoices/${inv.id}`} className="font-medium text-gray-900 truncate block max-w-[380px] hover:underline" title={inv.file_name}>
+                          {fileNameDisplay}
+                        </Link>
+                      </div>
+                    </td>
+                    <td className="px-2 py-1 w-[260px]">
+                      <span className="truncate block max-w-[220px]" title={ed.supplier_name || ''}>
+                        {supplierDisplay}
+                      </span>
+                    </td>
+                    <td className="px-2 py-1">{formatShortDate(ed.invoice_date)}</td>
+                    <td className="px-2 py-1 text-right">{ed.subtotal ? formatCurrency(ed.subtotal) : '—'}</td>
+                    <td className="px-2 py-1 text-right">{ed.total_amount ? formatCurrency(ed.total_amount) : '—'}</td>
+                    <td className="px-2 py-1">{ed.currency || '—'}</td>
+                    <td className="px-2 py-1">{getStatusBadge(inv.status)}</td>
+                    <td className="px-2 py-1">{formatShortDate(inv.created_at)}</td>
+                    <td className="px-2 py-1 text-right">
+                      <div className="flex justify-end space-x-1">
+                        <Button variant="outline" size="sm" className="h-7" onClick={() => handleView(inv.file_path)}>
+                          <Eye className="h-3 w-3" />
+                        </Button>
+                        <Button variant="outline" size="sm" className="h-7" onClick={() => handleDownload(inv.file_path, inv.file_name)}>
+                          <Download className="h-3 w-3" />
+                        </Button>
+                        <Button variant="outline" size="sm" className="text-red-600 hover:text-red-700 h-7" onClick={() => handleDelete(inv.id)}>
+                          <Trash2 className="h-3 w-3" />
+                        </Button>
+                      </div>
+                    </td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
         </div>
       )}
     </div>

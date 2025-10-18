@@ -19,6 +19,11 @@ export function SearchResults() {
   const [loading, setLoading] = useState(false)
   const [query, setQuery] = useState('')
 
+  const truncate = (value: string | undefined | null, max: number): string => {
+    if (!value) return '—'
+    return value.length > max ? value.slice(0, max - 3) + '...' : value
+  }
+
   const handleSearch = async (searchQuery: string) => {
     if (!searchQuery.trim()) {
       setResults([])
@@ -118,8 +123,8 @@ export function SearchResults() {
                   <div className="flex items-start space-x-3">
                     <FileText className="h-5 w-5 text-gray-400 mt-1" />
                     <div className="flex-1">
-                      <h4 className="text-sm font-medium text-gray-900">
-                        {result.invoice.file_name}
+                      <h4 className="text-sm font-medium text-gray-900" title={result.invoice.file_name}>
+                        {truncate(result.invoice.file_name, 40)}
                       </h4>
                       <p className="text-sm text-gray-500 mt-1">
                         {formatDate(result.invoice.created_at)}
@@ -129,7 +134,7 @@ export function SearchResults() {
                         <div className="mt-2 space-y-1">
                           {result.invoice.extracted_data.supplier_name && (
                             <p className="text-sm text-gray-600">
-                              <span className="font-medium">Fournisseur:</span> {result.invoice.extracted_data.supplier_name}
+                              <span className="font-medium">Fournisseur:</span> {truncate(result.invoice.extracted_data.supplier_name, 30)}
                             </p>
                           )}
                           {result.invoice.extracted_data.total_amount && (
