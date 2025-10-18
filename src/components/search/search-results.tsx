@@ -132,19 +132,19 @@ export function SearchResults() {
                       
                       {result.invoice.extracted_data && (
                         <div className="mt-2 space-y-1">
-                          {result.invoice.extracted_data.supplier_name && (
+                          {(result.invoice.extracted_data as any).supplier_name && (
                             <p className="text-sm text-gray-600">
-                              <span className="font-medium">Fournisseur:</span> {truncate(result.invoice.extracted_data.supplier_name, 30)}
+                              <span className="font-medium">Fournisseur:</span> {truncate((result.invoice.extracted_data as any).supplier_name, 30)}
                             </p>
                           )}
-                          {result.invoice.extracted_data.total_amount && (
+                          {(result.invoice.extracted_data as any).total_amount && (
                             <p className="text-sm text-gray-600">
-                              <span className="font-medium">Montant:</span> {formatCurrency(result.invoice.extracted_data.total_amount)}
+                              <span className="font-medium">Montant:</span> {formatCurrency((result.invoice.extracted_data as any).total_amount)}
                             </p>
                           )}
-                          {result.invoice.extracted_data.invoice_date && (
+                          {(result.invoice.extracted_data as any).invoice_date && (
                             <p className="text-sm text-gray-600">
-                              <span className="font-medium">Date:</span> {formatDate(result.invoice.extracted_data.invoice_date)}
+                              <span className="font-medium">Date:</span> {formatDate((result.invoice.extracted_data as any).invoice_date)}
                             </p>
                           )}
                         </div>

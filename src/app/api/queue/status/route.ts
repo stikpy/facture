@@ -21,27 +21,27 @@ export async function GET(request: NextRequest) {
     }
 
     // Récupérer le statut de la tâche
-    const { data: task, error: taskError } = await supabaseAdmin
+    const { data: task, error: taskError } = await (supabaseAdmin
       .from('processing_queue')
       .select('*')
       .eq('invoice_id', invoiceId)
       .eq('user_id', user.id)
       .order('created_at', { ascending: false })
       .limit(1)
-      .single()
+      .single() as any)
 
     if (taskError) {
       // Pas de tâche trouvée, vérifier le statut de la facture directement
-      const { data: invoice } = await supabaseAdmin
+      const { data: invoice } = await (supabaseAdmin
         .from('invoices')
         .select('status, extracted_data')
         .eq('id', invoiceId)
         .eq('user_id', user.id)
-        .single()
+        .single() as any)
 
       if (invoice) {
         return NextResponse.json({
-          status: invoice.status,
+          status: (invoice as any).status,
           hasTask: false
         })
       }
@@ -50,13 +50,13 @@ export async function GET(request: NextRequest) {
     }
 
     return NextResponse.json({
-      taskId: task.id,
-      status: task.status,
-      attempts: task.attempts,
-      errorMessage: task.error_message,
-      createdAt: task.created_at,
-      startedAt: task.started_at,
-      completedAt: task.completed_at,
+      taskId: (task as any).id,
+      status: (task as any).status,
+      attempts: (task as any).attempts,
+      errorMessage: (task as any).error_message,
+      createdAt: (task as any).created_at,
+      startedAt: (task as any).started_at,
+      completedAt: (task as any).completed_at,
       hasTask: true
     })
 

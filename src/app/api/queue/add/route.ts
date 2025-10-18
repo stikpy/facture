@@ -52,36 +52,36 @@ export async function POST(request: NextRequest) {
       .single()
 
     if (existingTask) {
-      console.log('⚠️ [QUEUE] Tâche déjà en queue:', existingTask.id)
+      console.log('⚠️ [QUEUE] Tâche déjà en queue:', (existingTask as any).id)
       // Fire-and-forget: tenter de démarrer un worker immédiatement
       try {
         fetch(`${process.env.NEXT_PUBLIC_APP_URL || ''}/api/queue/worker`).catch(() => {})
       } catch {}
       return NextResponse.json({
         success: true,
-        taskId: existingTask.id,
+        taskId: (existingTask as any).id,
         message: 'Tâche déjà en queue'
       })
     }
 
     // Ajouter la tâche à la queue
-    const { data: task, error: queueError } = await supabaseAdmin
+    const { data: task, error: queueError } = await ((supabaseAdmin as any)
       .from('processing_queue')
       .insert({
         invoice_id: invoiceId,
         user_id: user.id,
         priority,
         status: 'pending'
-      })
+      } as any)
       .select()
-      .single()
+      .single())
 
     if (queueError) {
       console.error('❌ [QUEUE] Erreur ajout tâche:', queueError)
       throw queueError
     }
 
-    console.log('✅ [QUEUE] Tâche ajoutée:', task.id)
+    console.log('✅ [QUEUE] Tâche ajoutée:', (task as any).id)
 
     // Fire-and-forget: démarrer le worker tout de suite (Hobby: pas de cron fréquent)
     try {
@@ -90,7 +90,7 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({
       success: true,
-      taskId: task.id
+      taskId: (task as any).id
     })
 
   } catch (error) {

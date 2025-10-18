@@ -85,29 +85,29 @@ export async function PUT(
     const { supplier_name, description, allocations } = body || {}
 
     // 1) Charger la facture
-    const { data: invoice, error: invErr } = await supabaseAdmin
+    const { data: invoice, error: invErr } = await (supabaseAdmin
       .from('invoices')
       .select('*')
       .eq('id', invoiceId)
       .eq('user_id', user.id)
-      .single()
+      .single() as any)
 
     if (invErr || !invoice) {
       return NextResponse.json({ error: 'Facture introuvable' }, { status: 404 })
     }
 
     // 2) Mettre à jour quelques champs dans extracted_data (JSON)
-    const extracted = invoice.extracted_data || {}
+    const extracted = (invoice as any)?.extracted_data || {}
     const updatedExtracted = {
       ...extracted,
       ...(supplier_name ? { supplier_name } : {}),
       ...(description ? { description } : {}),
     }
 
-    const { error: upErr } = await supabaseAdmin
+    const { error: upErr } = await ((supabaseAdmin as any)
       .from('invoices')
-      .update({ extracted_data: updatedExtracted })
-      .eq('id', invoiceId)
+      .update({ extracted_data: updatedExtracted } as any)
+      .eq('id', invoiceId))
 
     if (upErr) {
       return NextResponse.json({ error: upErr.message }, { status: 500 })
@@ -131,9 +131,9 @@ export async function PUT(
             label: a.label ? String(a.label) : null,
             amount: Number(a.amount || 0),
           }))
-          const { error: insErr } = await supabaseAdmin
+          const { error: insErr } = await ((supabaseAdmin as any)
             .from('invoice_allocations')
-            .insert(rows)
+            .insert(rows as any))
           if (insErr) throw insErr
         }
       } catch (e: any) {

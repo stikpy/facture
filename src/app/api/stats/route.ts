@@ -46,7 +46,7 @@ export async function GET(request: NextRequest) {
 
     if (error) throw error
 
-    const rows = data || []
+    const rows = (data as any[]) || []
 
     // Helpers
     const toNum = (n: any): number => (typeof n === 'number' ? n : 0)
@@ -89,7 +89,7 @@ export async function GET(request: NextRequest) {
     // Regroupement par jour ou par mois
     const byGroupMap = new Map<string, Totals>()
     for (const r of filtered) {
-      const key = group === 'day' ? yyyy_mm_dd(r.created_at) : yyyy_mm(r.created_at)
+      const key = group === 'day' ? yyyy_mm_dd(String((r as any).created_at)) : yyyy_mm(String((r as any).created_at))
       const ed = (r as any).extracted_data || {}
       const cur = byGroupMap.get(key) || { total: 0, ht: 0, tva: 0, count: 0 }
       cur.total += toNum(ed.total_amount)
@@ -104,8 +104,8 @@ export async function GET(request: NextRequest) {
 
     // Par année
     const byYearMap = new Map<string, Totals>()
-    for (const r of rows) {
-      const key = yOnly(r.created_at)
+    for (const r of rows as any[]) {
+      const key = yOnly(String((r as any).created_at))
       const ed = (r as any).extracted_data || {}
       const cur = byYearMap.get(key) || { total: 0, ht: 0, tva: 0, count: 0 }
       cur.total += toNum(ed.total_amount)

@@ -103,14 +103,15 @@ export function FileUpload() {
         })
         clearTimeout(timeoutId)
         console.log('📡 [CLIENT] Requête fetch terminée, traitement de la réponse...')
-      } catch (error) {
+      } catch (err: unknown) {
         clearTimeout(timeoutId)
-        if (error.name === 'AbortError') {
+        const e = err as Error & { name?: string }
+        if (e?.name === 'AbortError') {
           console.error('⏰ [CLIENT] Requête fetch annulée par timeout')
           throw new Error('La requête a pris trop de temps (timeout)')
         } else {
-          console.error('❌ [CLIENT] Erreur fetch:', error)
-          throw error
+          console.error('❌ [CLIENT] Erreur fetch:', err)
+          throw err
         }
       }
 

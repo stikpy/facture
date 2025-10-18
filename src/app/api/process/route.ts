@@ -44,22 +44,22 @@ export async function POST(request: NextRequest) {
 
     // Récupérer la facture (bypass RLS, avec contrôle d'ownership)
     console.log(`🔍 [SERVER] Récupération de la facture avec l'ID: ${fileId}`)
-    const { data: invoice, error: invoiceError } = await supabaseAdmin
+    const { data: invoice, error: invoiceError } = await (supabaseAdmin
       .from('invoices')
       .select('*')
       .eq('id', fileId)
-      .single()
+      .single() as any)
 
     if (invoiceError) {
       console.error('❌ [SERVER] Erreur lors de la récupération de la facture:', invoiceError)
       return NextResponse.json({ error: 'Erreur lors de la récupération de la facture: ' + invoiceError.message }, { status: 404 })
     }
     
-    if (!invoice) {
+    if (!(invoice as any)) {
       console.error('❌ [SERVER] Facture non trouvée')
       return NextResponse.json({ error: 'Facture non trouvée' }, { status: 404 })
     }
-    if (invoice.user_id !== user.id) {
+    if ((invoice as any).user_id !== user.id) {
       console.error('❌ [SERVER] Accès interdit à la facture')
       return NextResponse.json({ error: 'Accès interdit' }, { status: 403 })
     }
@@ -68,9 +68,9 @@ export async function POST(request: NextRequest) {
 
     // Mettre à jour le statut
     console.log('🔄 [SERVER] Mise à jour du statut vers "processing"')
-    await supabaseAdmin
+    await (supabaseAdmin as any)
       .from('invoices')
-      .update({ status: 'processing' })
+      .update({ status: 'processing' } as any)
       .eq('id', fileId)
 
     try {
@@ -115,13 +115,13 @@ export async function POST(request: NextRequest) {
 
       // Sauvegarder les données extraites
       console.log('💾 [SERVER] Sauvegarde des données extraites en base')
-      const { error: updateError } = await supabaseAdmin
+      const { error: updateError } = await (supabaseAdmin as any)
         .from('invoices')
         .update({
           extracted_data: extractedData,
           classification: classification.category,
           status: 'completed'
-        })
+        } as any)
         .eq('id', fileId)
 
       if (updateError) {
@@ -141,9 +141,9 @@ export async function POST(request: NextRequest) {
           total_price: item.total_price
         }))
 
-        await supabaseAdmin
+        await (supabaseAdmin as any)
           .from('invoice_items')
-          .insert(items)
+          .insert(items as any)
         console.log('✅ [SERVER] Articles de facture créés')
       }
 
@@ -161,12 +161,12 @@ export async function POST(request: NextRequest) {
       
       // Mettre à jour le statut d'erreur
       console.log('🔄 [SERVER] Mise à jour du statut vers "error"')
-      await supabaseAdmin
+      await (supabaseAdmin as any)
         .from('invoices')
         .update({ 
           status: 'error',
           extracted_data: { error: (processingError as Error).message }
-        })
+        } as any)
         .eq('id', fileId)
 
       return NextResponse.json(
