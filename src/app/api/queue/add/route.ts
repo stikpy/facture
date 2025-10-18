@@ -53,6 +53,10 @@ export async function POST(request: NextRequest) {
 
     if (existingTask) {
       console.log('⚠️ [QUEUE] Tâche déjà en queue:', existingTask.id)
+      // Fire-and-forget: tenter de démarrer un worker immédiatement
+      try {
+        fetch(`${process.env.NEXT_PUBLIC_APP_URL || ''}/api/queue/worker`).catch(() => {})
+      } catch {}
       return NextResponse.json({
         success: true,
         taskId: existingTask.id,
@@ -78,6 +82,11 @@ export async function POST(request: NextRequest) {
     }
 
     console.log('✅ [QUEUE] Tâche ajoutée:', task.id)
+
+    // Fire-and-forget: démarrer le worker tout de suite (Hobby: pas de cron fréquent)
+    try {
+      fetch(`${process.env.NEXT_PUBLIC_APP_URL || ''}/api/queue/worker`).catch(() => {})
+    } catch {}
 
     return NextResponse.json({
       success: true,
