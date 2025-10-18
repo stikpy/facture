@@ -1,4 +1,4 @@
-import { NextResponse } from 'next/server'
+import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabaseClient } from '@/lib/supabase-server'
 import type { Session } from '@supabase/supabase-js'
 
@@ -7,6 +7,27 @@ interface AuthCallbackPayload {
   session: Session | null
 }
 
+// Gestion du retour du magic link
+export async function GET(request: NextRequest) {
+  const requestUrl = new URL(request.url)
+  const code = requestUrl.searchParams.get('code')
+  const next = requestUrl.searchParams.get('next') ?? '/'
+
+  if (code) {
+    const supabase = await createServerSupabaseClient()
+    const { error } = await supabase.auth.exchangeCodeForSession(code)
+    
+    if (!error) {
+      // Redirection vers la page principale après connexion réussie
+      return NextResponse.redirect(new URL(next, request.url))
+    }
+  }
+
+  // En cas d'erreur, rediriger vers la page de connexion
+  return NextResponse.redirect(new URL('/auth', request.url))
+}
+
+// Callback pour les événements d'authentification côté client
 export async function POST(request: Request) {
   const supabase = await createServerSupabaseClient()
   const { event, session }: AuthCallbackPayload = await request.json()
