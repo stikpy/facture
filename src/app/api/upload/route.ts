@@ -8,38 +8,36 @@ export async function POST(request: NextRequest) {
   try {
     console.log('🔧 [SERVER] Création du client Supabase serveur')
     const supabase = await createServerSupabaseClient()
-    
-    // Vérifier l'authentification via les headers Authorization
-    console.log('🔐 [SERVER] Vérification de l\'authentification via headers')
-    const authHeader = request.headers.get('authorization')
-    console.log('📋 [SERVER] Authorization header:', authHeader ? 'Présent' : 'Manquant')
-    
-    if (!authHeader) {
-      console.error('❌ [SERVER] Aucun header d\'autorisation')
-      return NextResponse.json({ 
-        error: 'Token d\'authentification manquant',
-        description: 'Vous devez être connecté pour uploader des fichiers'
-      }, { status: 401 })
+
+    console.log('🔐 [SERVER] Vérification de l\'authentification via cookies')
+    let {
+      data: { user },
+      error: authError,
+    } = await supabase.auth.getUser()
+
+    if (!user) {
+      console.log('🔄 [SERVER] Aucun utilisateur via cookies, tentative via Authorization header')
+      const authHeader = request.headers.get('authorization')
+      console.log('📋 [SERVER] Authorization header:', authHeader ? 'Présent' : 'Manquant')
+
+      if (authHeader) {
+        const token = authHeader.replace('Bearer ', '')
+        console.log('🔑 [SERVER] Token JWT extrait:', token.substring(0, 20) + '...')
+        ({ data: { user }, error: authError } = await supabase.auth.getUser(token))
+      }
     }
-    
-    // Extraire le token JWT
-    const token = authHeader.replace('Bearer ', '')
-    console.log('🔑 [SERVER] Token JWT extrait:', token.substring(0, 20) + '...')
-    
-    // Vérifier le token avec Supabase
-    const { data: { user }, error: authError } = await supabase.auth.getUser(token)
-    
+
     if (authError) {
       console.error('❌ [SERVER] Erreur d\'authentification:', authError)
-      return NextResponse.json({ 
-        error: 'Token invalide: ' + authError.message 
+      return NextResponse.json({
+        error: 'Token invalide: ' + authError.message
       }, { status: 401 })
     }
     
     if (!user) {
-      console.error('❌ [SERVER] Aucun utilisateur trouvé pour ce token')
-      return NextResponse.json({ 
-        error: 'Token invalide',
+      console.error('❌ [SERVER] Aucun utilisateur authentifié')
+      return NextResponse.json({
+        error: 'Session invalide',
         description: 'L\'utilisateur n\'a pas de session active ou n\'est pas authentifié'
       }, { status: 401 })
     }

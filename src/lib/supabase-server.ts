@@ -22,6 +22,15 @@ export const createServerSupabaseClient = async () => {
           // Les cookies sont déjà définis
         }
       },
+      deleteAll(cookiesToDelete) {
+        try {
+          cookiesToDelete.forEach(({ name, options }) => {
+            cookieStore.set(name, '', { ...options, maxAge: 0 })
+          })
+        } catch (error) {
+          // Les cookies sont déjà supprimés
+        }
+      },
     },
   })
 }

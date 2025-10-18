@@ -33,6 +33,19 @@ export function Providers({ children }: { children: React.ReactNode }) {
       async (event, session) => {
         setUser(session?.user ?? null)
         setLoading(false)
+
+        try {
+          await fetch('/auth/callback', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            credentials: 'same-origin',
+            body: JSON.stringify({ event, session }),
+          })
+        } catch (error) {
+          console.error('Failed to sync auth state with server', error)
+        }
       }
     )
 

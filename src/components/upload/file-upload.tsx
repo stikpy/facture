@@ -69,52 +69,29 @@ export function FileUpload() {
       // Vérifier que l'utilisateur est connecté
       const supabase = createClient()
       const { data: { user } } = await supabase.auth.getUser()
-      
+
       if (!user) {
         console.error('❌ [CLIENT] Utilisateur non connecté')
         throw new Error('Vous devez être connecté pour uploader des fichiers')
       }
-      
+
       console.log('✅ [CLIENT] Utilisateur connecté:', user.email)
-      
-      // Récupérer le token d'authentification
-      console.log('🔍 [CLIENT] Récupération de la session...')
-      const { data: { session }, error: sessionError } = await supabase.auth.getSession()
-      console.log('📋 [CLIENT] Session récupérée:', session ? 'Présente' : 'Absente')
-      console.log('❌ [CLIENT] Erreur session:', sessionError)
-      
-      const token = session?.access_token
-      console.log('🔑 [CLIENT] Token extrait:', token ? 'Présent' : 'Absent')
-      
-      if (!token) {
-        console.error('❌ [CLIENT] Aucun token d\'authentification trouvé')
-        console.error('❌ [CLIENT] Session complète:', session)
-        throw new Error('Session expirée, veuillez vous reconnecter')
-      }
-      
-      console.log('🔑 [CLIENT] Token d\'authentification trouvé:', token.substring(0, 20) + '...')
-      console.log('🔍 [CLIENT] Token complet:', token)
-      console.log('🔍 [CLIENT] Type du token:', typeof token)
-      console.log('🔍 [CLIENT] Longueur du token:', token?.length)
-      
+
       console.log('🌐 [CLIENT] Envoi de la requête fetch vers /api/upload...')
-      console.log('🌐 [CLIENT] Headers à envoyer:', { 'Authorization': `Bearer ${token}` })
-      
+
       // Ajouter un timeout pour éviter que la requête se bloque
       const controller = new AbortController()
       const timeoutId = setTimeout(() => {
         console.log('⏰ [CLIENT] Timeout de la requête fetch (30s)')
         controller.abort()
       }, 30000)
-      
+
       let response
       try {
         response = await fetch('/api/upload', {
           method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${token}`
-          },
           body: formData,
+          credentials: 'include',
           signal: controller.signal
         })
         clearTimeout(timeoutId)
