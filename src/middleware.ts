@@ -46,6 +46,16 @@ export async function middleware(request: NextRequest) {
     return NextResponse.redirect(url)
   }
 
+  // Si l'utilisateur est connecté et est sur la page d'auth, rediriger vers le dashboard
+  if (
+    user &&
+    request.nextUrl.pathname.startsWith('/auth')
+  ) {
+    const url = request.nextUrl.clone()
+    url.pathname = '/'
+    return NextResponse.redirect(url)
+  }
+
   // IMPORTANT: You *must* return the supabaseResponse object as it is.
   // This ensures proper cookie handling and session management.
   return supabaseResponse

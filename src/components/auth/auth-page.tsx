@@ -83,6 +83,8 @@ export function AuthPage() {
         }
         
         console.log('✅ [AUTH] Connexion réussie')
+        // Rediriger vers le dashboard après connexion réussie
+        window.location.href = '/'
       }
     } catch (error) {
       console.error('❌ [AUTH] Erreur générale:', error)
