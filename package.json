@@ -9,7 +9,12 @@
     "lint": "next lint",
     "type-check": "tsc --noEmit",
     "test-config": "node scripts/test-setup.js",
-    "setup-db": "node scripts/setup-database.js"
+    "setup-db": "node scripts/setup-database.js",
+    "merge-suppliers": "node scripts/merge-suppliers.js",
+    "merge-suppliers:dry": "node scripts/merge-suppliers.js --dry-run",
+    "backfill-suppliers": "node scripts/backfill-suppliers.js",
+    "backfill-suppliers:dry": "node scripts/backfill-suppliers.js --dry-run",
+    "migrate-storage-org": "node scripts/migrate-storage-to-org.js"
   },
   "dependencies": {
     "@langchain/community": "^0.3.7",

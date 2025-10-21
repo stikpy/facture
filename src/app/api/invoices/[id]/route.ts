@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/utils/supabase/server'
 import { supabaseAdmin } from '@/lib/supabase'
+import { normalizeSupplier } from '@/lib/suppliers'
 
 export async function GET(
   _request: NextRequest,
@@ -29,11 +30,22 @@ export async function GET(
       .from('invoices')
       .select('*')
       .eq('id', invoiceId)
-      .eq('user_id', user.id)
       .single()
 
     if (invErr || !invoice) {
       return NextResponse.json({ error: 'Facture introuvable' }, { status: 404 })
+    }
+
+    // Vérifier appartenance à l'organisation
+    if ((invoice as any).organization_id) {
+      const { data: memberships } = await (supabaseAdmin as any)
+        .from('organization_members')
+        .select('organization_id')
+        .eq('user_id', user.id)
+      const orgIds = ((memberships as any[]) || []).map(m => m.organization_id)
+      if (!orgIds.includes((invoice as any).organization_id)) {
+        return NextResponse.json({ error: 'Accès interdit' }, { status: 403 })
+      }
     }
 
     let allocations: any[] = []
@@ -82,45 +94,79 @@ export async function PUT(
 
     const { id: invoiceId } = await context.params
     const body = await request.json()
-    const { supplier_name, description, allocations } = body || {}
+    const { supplier_name, supplier_id, description, allocations,
+      client_name, invoice_number, invoice_date, due_date, subtotal, tax_amount, total_amount } = body || {}
 
     // 1) Charger la facture
     const { data: invoice, error: invErr } = await (supabaseAdmin
       .from('invoices')
       .select('*')
       .eq('id', invoiceId)
-      .eq('user_id', user.id)
       .single() as any)
 
     if (invErr || !invoice) {
       return NextResponse.json({ error: 'Facture introuvable' }, { status: 404 })
     }
 
-    // 2) Mettre à jour quelques champs dans extracted_data (JSON)
+    // 2) Vérifier appartenance à l'organisation
+    if ((invoice as any).organization_id) {
+      const { data: memberships } = await (supabaseAdmin as any)
+        .from('organization_members')
+        .select('organization_id')
+        .eq('user_id', user.id)
+      const orgIds = ((memberships as any[]) || []).map(m => m.organization_id)
+      if (!orgIds.includes((invoice as any).organization_id)) {
+        return NextResponse.json({ error: 'Accès interdit' }, { status: 403 })
+      }
+    }
+
+    // 3) Mettre à jour quelques champs dans extracted_data (JSON)
     const extracted = (invoice as any)?.extracted_data || {}
     const updatedExtracted = {
       ...extracted,
       ...(supplier_name ? { supplier_name } : {}),
       ...(description ? { description } : {}),
+      ...(client_name !== undefined ? { client_name } : {}),
+      ...(invoice_number !== undefined ? { invoice_number } : {}),
+      ...(invoice_date !== undefined ? { invoice_date } : {}),
+      ...(due_date !== undefined ? { due_date } : {}),
+      ...(subtotal !== undefined ? { subtotal } : {}),
+      ...(tax_amount !== undefined ? { tax_amount } : {}),
+      ...(total_amount !== undefined ? { total_amount } : {}),
     }
 
+    const updatePayload: any = { extracted_data: updatedExtracted }
+    if (supplier_id) updatePayload.supplier_id = supplier_id
     const { error: upErr } = await ((supabaseAdmin as any)
       .from('invoices')
-      .update({ extracted_data: updatedExtracted } as any)
+      .update(updatePayload as any)
       .eq('id', invoiceId))
 
     if (upErr) {
       return NextResponse.json({ error: upErr.message }, { status: 500 })
     }
 
-    // 3) Réécrire la ventilation
+    // 4) Si on a choisi un supplier_id et un supplier_name brut, enregistrer l'alias pour les prochaines reconnaissances
+    try {
+      if (supplier_id && supplier_name) {
+        const aliasKey = normalizeSupplier(String(supplier_name))
+        if (aliasKey) {
+          await (supabaseAdmin as any)
+            .from('supplier_aliases')
+            .insert({ supplier_id, alias_key: aliasKey } as any)
+            .onConflict('supplier_id,alias_key')
+            .ignore?.()
+        }
+      }
+    } catch {}
+
+    // 5) Réécrire la ventilation
     if (Array.isArray(allocations)) {
       try {
         const { error: delErr } = await supabaseAdmin
           .from('invoice_allocations')
           .delete()
           .eq('invoice_id', invoiceId)
-          .eq('user_id', user.id)
         if (delErr) throw delErr
 
         if (allocations.length > 0) {

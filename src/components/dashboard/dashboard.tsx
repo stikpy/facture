@@ -4,15 +4,13 @@ import { useState } from 'react'
 import { useAuth } from '@/app/providers'
 import { createClient } from '@/utils/supabase/client'
 import { Button } from '@/components/ui/button'
-import { FileUpload } from '@/components/upload/file-upload'
 import { InvoiceList } from '@/components/invoices/invoice-list'
-import { StatsCards } from '@/components/dashboard/stats-cards'
-import { Upload, FileText, LogOut } from 'lucide-react'
+import { FileText, LogOut, Upload } from 'lucide-react'
 import Link from 'next/link'
 
 export function Dashboard() {
   const { user } = useAuth()
-  const [activeTab, setActiveTab] = useState<'upload' | 'invoices'>('upload')
+  const [activeTab, setActiveTab] = useState<'invoices'>('invoices')
 
   const handleSignOut = async () => {
     const supabase = createClient()
@@ -35,6 +33,12 @@ export function Dashboard() {
               </Link>
             </div>
             <div className="flex items-center space-x-4">
+              <Link href="/import" className="hidden sm:inline-block">
+                <Button size="sm">
+                  <Upload className="h-4 w-4 mr-2" />
+                  Importer
+                </Button>
+              </Link>
               <span className="text-sm text-gray-700">
                 {user?.email}
               </span>
@@ -51,44 +55,17 @@ export function Dashboard() {
         </div>
       </header>
 
-      {/* Navigation */}
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="flex space-x-8 mt-6">
-          <button
-            onClick={() => setActiveTab('upload')}
-            className={`flex items-center px-1 pt-1 border-b-2 font-medium text-sm ${
-              activeTab === 'upload'
-                ? 'border-primary text-primary'
-                : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
-            }`}
-          >
-            <Upload className="h-4 w-4 mr-2" />
-            Upload de factures
-          </button>
-          <button
-            onClick={() => setActiveTab('invoices')}
-            className={`flex items-center px-1 pt-1 border-b-2 font-medium text-sm ${
-              activeTab === 'invoices'
-                ? 'border-primary text-primary'
-                : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
-            }`}
-          >
-            <FileText className="h-4 w-4 mr-2" />
-            Mes factures
-          </button>
+      {/* Navigation allégée */}
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 mt-6">
+        <div className="flex items-center text-sm text-gray-600">
+          <span>Pour importer, allez sur</span>
+          <Link href="/import" className="ml-1 text-primary hover:underline">Importer des factures</Link>
         </div>
       </div>
 
       {/* Main Content */}
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        {activeTab === 'upload' ? (
-          <div className="space-y-8">
-            <StatsCards />
-            <FileUpload />
-          </div>
-        ) : (
-          <InvoiceList />
-        )}
+        <InvoiceList />
       </main>
     </div>
   )

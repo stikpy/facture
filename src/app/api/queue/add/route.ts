@@ -31,16 +31,25 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Invoice ID requis' }, { status: 400 })
     }
 
-    // Vérifier que la facture existe et appartient à l'utilisateur
+    // Vérifier que la facture existe et appartient à l'organisation de l'utilisateur
     const { data: invoice, error: invoiceError } = await supabaseAdmin
       .from('invoices')
-      .select('id, user_id')
+      .select('id, user_id, organization_id')
       .eq('id', invoiceId)
-      .eq('user_id', user.id)
       .single()
 
     if (invoiceError || !invoice) {
       return NextResponse.json({ error: 'Facture introuvable' }, { status: 404 })
+    }
+
+    // Optionnel: vérifier l'appartenance à l'orga via membership
+    const { data: memberships } = await (supabaseAdmin as any)
+      .from('organization_members')
+      .select('organization_id')
+      .eq('user_id', user.id)
+    const orgIds = ((memberships as any[]) || []).map(m => m.organization_id)
+    if ((invoice as any).organization_id && orgIds.length > 0 && !orgIds.includes((invoice as any).organization_id)) {
+      return NextResponse.json({ error: 'Accès interdit à cette facture' }, { status: 403 })
     }
 
     // Vérifier si une tâche existe déjà pour cette facture

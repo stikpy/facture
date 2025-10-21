@@ -23,6 +23,8 @@ export default function InvoiceEditPage() {
   const [error, setError] = useState<string | null>(null)
   const [supplierName, setSupplierName] = useState('')
   const [description, setDescription] = useState('')
+  const [supplierId, setSupplierId] = useState<string | null>(null)
+  const [supplierOptions, setSupplierOptions] = useState<Array<{ id: string, code?: string, display_name: string }>>([])
   const [allocations, setAllocations] = useState<AllocationFormRow[]>([])
   const [invoiceTotal, setInvoiceTotal] = useState<number>(0)
   const [invoice, setInvoice] = useState<any | null>(null)
@@ -31,6 +33,14 @@ export default function InvoiceEditPage() {
   const [pdfZoom, setPdfZoom] = useState(100)
   const [previewWidth, setPreviewWidth] = useState(33.33) // % de la largeur
   const [isResizing, setIsResizing] = useState(false)
+  const [isEditingProps, setIsEditingProps] = useState(false)
+  const [clientName, setClientName] = useState('')
+  const [invoiceNumber, setInvoiceNumber] = useState('')
+  const [docDate, setDocDate] = useState('')
+  const [dueDate, setDueDate] = useState('')
+  const [subtotal, setSubtotal] = useState<string>('')
+  const [taxAmount, setTaxAmount] = useState<string>('')
+  const [totalAmount, setTotalAmount] = useState<string>('')
   const round2 = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100
   const vatRateFromCode = (code?: string) => {
     const v = findVatByCode(code)
@@ -84,8 +94,28 @@ export default function InvoiceEditPage() {
         const supplier = data.invoice?.extracted_data?.supplier_name || ''
         setInvoice(data.invoice)
         setSupplierName(supplier)
+        setSupplierId(data.invoice?.supplier_id || null)
         setDescription(data.invoice?.extracted_data?.description || '')
         setInvoiceTotal(Number(data.invoice?.extracted_data?.total_amount || 0))
+        setClientName(data.invoice?.extracted_data?.client_name || '')
+        setInvoiceNumber(data.invoice?.extracted_data?.invoice_number || '')
+        // Dates en yyyy-mm-dd pour inputs
+        const invDate = data.invoice?.extracted_data?.invoice_date
+        const due = data.invoice?.extracted_data?.due_date
+        const toYmd = (d?: string) => {
+          if (!d) return ''
+          const dt = new Date(d)
+          if (isNaN(dt.getTime())) return ''
+          const y = dt.getFullYear()
+          const m = String(dt.getMonth() + 1).padStart(2, '0')
+          const day = String(dt.getDate()).padStart(2, '0')
+          return `${y}-${m}-${day}`
+        }
+        setDocDate(toYmd(invDate))
+        setDueDate(toYmd(due))
+        setSubtotal(String(data.invoice?.extracted_data?.subtotal ?? ''))
+        setTaxAmount(String(data.invoice?.extracted_data?.tax_amount ?? ''))
+        setTotalAmount(String(data.invoice?.extracted_data?.total_amount ?? ''))
         try {
           if (data.invoice?.file_path) {
             const { data: pub } = createClient().storage.from('invoices').getPublicUrl(data.invoice.file_path)
@@ -145,7 +175,20 @@ export default function InvoiceEditPage() {
           'Content-Type': 'application/json',
           ...(session?.access_token ? { Authorization: `Bearer ${session.access_token}` } : {})
         },
-        body: JSON.stringify({ supplier_name: supplierName, description, allocations: derived }),
+        body: JSON.stringify({
+          supplier_name: supplierName,
+          supplier_id: supplierId,
+          description,
+          // Propriétés éditées
+          client_name: clientName || undefined,
+          invoice_number: invoiceNumber || undefined,
+          invoice_date: docDate || undefined,
+          due_date: dueDate || undefined,
+          subtotal: subtotal !== '' ? Number(subtotal) : undefined,
+          tax_amount: taxAmount !== '' ? Number(taxAmount) : undefined,
+          total_amount: totalAmount !== '' ? Number(totalAmount) : undefined,
+          allocations: derived
+        }),
       })
       const data = await res.json()
       if (!res.ok) throw new Error(data.error || 'Erreur sauvegarde')
@@ -155,6 +198,19 @@ export default function InvoiceEditPage() {
     } finally {
       setSaving(false)
     }
+  }
+
+  // Recherche fournisseurs (autocomplete)
+  const searchSuppliers = async (q: string) => {
+    try {
+      const supabase = createClient()
+      const { data } = await (supabase
+        .from('suppliers')
+        .select('id, code, display_name')
+        .ilike('display_name', `%${q}%`)
+        .limit(10) as any)
+      setSupplierOptions((data || []) as any)
+    } catch {}
   }
 
   if (loading) {
@@ -195,11 +251,20 @@ export default function InvoiceEditPage() {
         <div className="flex gap-0 relative">
           <div className="space-y-4" style={{ width: showPreview ? `${100 - previewWidth}%` : '100%', transition: isResizing ? 'none' : 'width 0.3s', paddingRight: showPreview ? '12px' : '0' }}>
             <div className="bg-white shadow rounded p-4">
-              <h2 className="text-sm font-semibold text-gray-900 mb-3">Propriétés</h2>
+              <div className="flex items-center justify-between mb-3">
+                <h2 className="text-sm font-semibold text-gray-900">Propriétés</h2>
+                <Button size="sm" variant="outline" onClick={() => setIsEditingProps((v) => !v)}>
+                  {isEditingProps ? 'Terminer' : 'Modifier'}
+                </Button>
+              </div>
               <div className="grid grid-cols-2 gap-3 text-xs">
                 <div>
                   <div className="text-gray-500">Organisation</div>
-                  <div className="font-medium">{invoice?.extracted_data?.client_name || '—'}</div>
+                  {isEditingProps ? (
+                    <Input value={clientName} onChange={(e: any) => setClientName(e.target.value)} />
+                  ) : (
+                    <div className="font-medium">{invoice?.extracted_data?.client_name || '—'}</div>
+                  )}
                 </div>
                 <div>
                   <div className="text-gray-500">Type de document</div>
@@ -211,11 +276,19 @@ export default function InvoiceEditPage() {
                 </div>
                 <div>
                   <div className="text-gray-500">N° document</div>
-                  <div className="font-medium">{invoice?.extracted_data?.invoice_number || '—'}</div>
+                  {isEditingProps ? (
+                    <Input value={invoiceNumber} onChange={(e: any) => setInvoiceNumber(e.target.value)} />
+                  ) : (
+                    <div className="font-medium">{invoice?.extracted_data?.invoice_number || '—'}</div>
+                  )}
                 </div>
                 <div>
                   <div className="text-gray-500">Date document</div>
-                  <div className="font-medium">{formatShortDate(invoice?.extracted_data?.invoice_date)}</div>
+                  {isEditingProps ? (
+                    <input type="date" value={docDate} onChange={(e) => setDocDate(e.target.value)} className="border rounded px-2 py-1" />
+                  ) : (
+                    <div className="font-medium">{formatShortDate(invoice?.extracted_data?.invoice_date)}</div>
+                  )}
                 </div>
                 <div>
                   <div className="text-gray-500">Date de réception</div>
@@ -223,19 +296,35 @@ export default function InvoiceEditPage() {
                 </div>
                 <div>
                   <div className="text-gray-500">Date d'échéance</div>
-                  <div className="font-medium">{formatShortDate(invoice?.extracted_data?.due_date)}</div>
+                  {isEditingProps ? (
+                    <input type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} className="border rounded px-2 py-1" />
+                  ) : (
+                    <div className="font-medium">{formatShortDate(invoice?.extracted_data?.due_date)}</div>
+                  )}
                 </div>
                 <div>
                   <div className="text-gray-500">Montant de base</div>
-                  <div className="font-medium">{(invoice?.extracted_data?.subtotal ?? 0).toFixed(2)} €</div>
+                  {isEditingProps ? (
+                    <Input type="number" step="0.01" value={subtotal} onChange={(e: any) => setSubtotal(e.target.value)} />
+                  ) : (
+                    <div className="font-medium">{(invoice?.extracted_data?.subtotal ?? 0).toFixed(2)} €</div>
+                  )}
                 </div>
                 <div>
                   <div className="text-gray-500">Montant de taxe</div>
-                  <div className="font-medium">{(invoice?.extracted_data?.tax_amount ?? 0).toFixed(2)} €</div>
+                  {isEditingProps ? (
+                    <Input type="number" step="0.01" value={taxAmount} onChange={(e: any) => setTaxAmount(e.target.value)} />
+                  ) : (
+                    <div className="font-medium">{(invoice?.extracted_data?.tax_amount ?? 0).toFixed(2)} €</div>
+                  )}
                 </div>
                 <div>
                   <div className="text-gray-500">Montant total</div>
-                  <div className="font-medium">{(invoice?.extracted_data?.total_amount ?? 0).toFixed(2)} €</div>
+                  {isEditingProps ? (
+                    <Input type="number" step="0.01" value={totalAmount} onChange={(e: any) => setTotalAmount(e.target.value)} />
+                  ) : (
+                    <div className="font-medium">{(invoice?.extracted_data?.total_amount ?? 0).toFixed(2)} €</div>
+                  )}
                 </div>
               </div>
             </div>
@@ -245,7 +334,37 @@ export default function InvoiceEditPage() {
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block text-xs text-gray-500 mb-1">Fournisseur</label>
-                  <Input value={supplierName} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setSupplierName(e.target.value)} placeholder="Nom du fournisseur" />
+                  <div className="relative">
+                    <Input 
+                      value={supplierName} 
+                      onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
+                        const v = e.target.value
+                        setSupplierName(v)
+                        setSupplierId(null)
+                        if (v && v.length >= 2) searchSuppliers(v)
+                        else setSupplierOptions([])
+                      }} 
+                      placeholder="Nom du fournisseur" 
+                    />
+                    {supplierOptions.length > 0 && (
+                      <div className="absolute z-20 mt-1 w-full bg-white border rounded shadow max-h-56 overflow-auto text-sm">
+                        {supplierOptions.map((opt) => (
+                          <button
+                            key={opt.id}
+                            type="button"
+                            onClick={() => { setSupplierName(opt.display_name); setSupplierId(opt.id); setSupplierOptions([]) }}
+                            className="w-full text-left px-3 py-2 hover:bg-gray-50"
+                          >
+                            <div className="font-medium text-gray-900">{opt.display_name}</div>
+                            <div className="text-xs text-gray-500">{opt.code || '—'}</div>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                    {supplierId && (
+                      <div className="mt-1 text-xs text-gray-500">ID sélectionné: {supplierId}</div>
+                    )}
+                  </div>
                 </div>
                 <div>
                   <label className="block text-xs text-gray-500 mb-1">Description</label>

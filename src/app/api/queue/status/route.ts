@@ -25,7 +25,6 @@ export async function GET(request: NextRequest) {
       .from('processing_queue')
       .select('*')
       .eq('invoice_id', invoiceId)
-      .eq('user_id', user.id)
       .order('created_at', { ascending: false })
       .limit(1)
       .single() as any)
@@ -34,9 +33,8 @@ export async function GET(request: NextRequest) {
       // Pas de tâche trouvée, vérifier le statut de la facture directement
       const { data: invoice } = await (supabaseAdmin
         .from('invoices')
-        .select('status, extracted_data')
+        .select('status, extracted_data, organization_id')
         .eq('id', invoiceId)
-        .eq('user_id', user.id)
         .single() as any)
 
       if (invoice) {

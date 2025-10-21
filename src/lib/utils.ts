@@ -27,3 +27,19 @@ export function formatFileSize(bytes: number): string {
   const i = Math.floor(Math.log(bytes) / Math.log(1024))
   return Math.round(bytes / Math.pow(1024, i) * 100) / 100 + ' ' + sizes[i]
 }
+
+// Affichage uniforme des noms (Title Case FR avec gestion tirets)
+export function formatTitleCaseName(name: string): string {
+  if (!name) return ''
+  const keepUpper = new Set(['SAS', 'SASU', 'SARL', 'SA', 'EURL', 'SPA', 'LTD', 'INC'])
+  const lower = String(name).toLocaleLowerCase('fr-FR').trim()
+  const words = lower.split(/\s+/)
+  const up = words.map((w) => {
+    // garder les abréviations connues en majuscules
+    const raw = w.toUpperCase()
+    if (keepUpper.has(raw)) return raw
+    // gérer les mots composés avec tirets
+    return w.split('-').map(part => part ? part[0].toLocaleUpperCase('fr-FR') + part.slice(1) : part).join('-')
+  })
+  return up.join(' ')
+}

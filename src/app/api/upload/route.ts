@@ -94,6 +94,20 @@ export async function POST(request: NextRequest) {
     const buffer = Buffer.from(await file.arrayBuffer())
     console.log(`📦 [SERVER] Buffer créé: ${buffer.length} bytes`)
 
+    // Déterminer l'organisation autorisée
+    const metaOrgId = (user as any)?.user_metadata?.organization_id || null
+    const { data: memberships } = await (supabaseAdmin as any)
+      .from('organization_members')
+      .select('organization_id')
+      .eq('user_id', user.id)
+    const allowedOrgIds: string[] = (memberships as any[])?.map((m: any) => m.organization_id) || []
+    if (!metaOrgId && allowedOrgIds.length === 0) {
+      return NextResponse.json({ error: 'Aucune organisation assignée. Contactez un administrateur.' }, { status: 403 })
+    }
+    const orgId: string = (metaOrgId && allowedOrgIds.includes(metaOrgId))
+      ? metaOrgId
+      : (allowedOrgIds[0] as string)
+
     // Upload vers Supabase Storage
     console.log('☁️ [SERVER] Upload vers Supabase Storage')
     const storageService = new StorageService()
@@ -101,7 +115,7 @@ export async function POST(request: NextRequest) {
       buffer,
       file.name,
       file.type,
-      user.id
+      orgId
     )
     console.log(`✅ [SERVER] Fichier uploadé vers: ${path}`)
 
@@ -113,6 +127,7 @@ export async function POST(request: NextRequest) {
       .insert([
         {
           user_id: user.id,
+          organization_id: orgId,
           file_name: file.name,
           file_path: path,
           file_size: file.size,

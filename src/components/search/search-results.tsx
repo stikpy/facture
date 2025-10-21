@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react'
 import { createClient } from '@/utils/supabase/client'
 import { SearchBar } from './search-bar'
 import { LoadingSpinner } from '@/components/ui/loading-spinner'
-import { formatCurrency, formatDate } from '@/lib/utils'
+import { formatCurrency, formatDate, formatTitleCaseName } from '@/lib/utils'
 import { FileText, Search } from 'lucide-react'
 import type { Invoice } from '@/types/database'
 
@@ -134,7 +134,7 @@ export function SearchResults() {
                         <div className="mt-2 space-y-1">
                           {(result.invoice.extracted_data as any).supplier_name && (
                             <p className="text-sm text-gray-600">
-                              <span className="font-medium">Fournisseur:</span> {truncate((result.invoice.extracted_data as any).supplier_name, 30)}
+                              <span className="font-medium">Fournisseur:</span> {truncate(formatTitleCaseName((result.invoice.extracted_data as any).supplier_name), 30)}
                             </p>
                           )}
                           {(result.invoice.extracted_data as any).total_amount && (

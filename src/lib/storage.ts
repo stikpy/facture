@@ -12,7 +12,7 @@ export class StorageService {
       if (!existingBucket || getBucketError) {
         // Certaines versions n'ont pas getBucket: on tente la création directement
         const { error: createError } = await supabaseAdmin.storage.createBucket(this.bucketName, {
-          public: true,
+          public: false,
         })
         if (createError && !/already exists/i.test(createError.message)) {
           throw createError
@@ -28,7 +28,7 @@ export class StorageService {
     file: Buffer,
     fileName: string,
     mimeType: string,
-    userId: string
+    organizationId: string
   ): Promise<{ path: string; url: string }> {
     try {
       // S'assurer que le bucket existe
@@ -36,7 +36,7 @@ export class StorageService {
 
       const fileId = uuidv4()
       const fileExtension = fileName.split('.').pop()
-      const filePath = `${userId}/${fileId}.${fileExtension}`
+      const filePath = `${organizationId}/${fileId}.${fileExtension}`
       
       const { data, error } = await supabaseAdmin.storage
         .from(this.bucketName)
@@ -49,13 +49,9 @@ export class StorageService {
         throw new Error(`Erreur upload: ${error.message}`)
       }
 
-      const { data: urlData } = supabaseAdmin.storage
-        .from(this.bucketName)
-        .getPublicUrl(filePath)
-
       return {
         path: data.path,
-        url: urlData.publicUrl
+        url: ''
       }
     } catch (error) {
       console.error('Erreur upload fichier:', error)

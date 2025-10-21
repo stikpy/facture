@@ -1,13 +1,14 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { createClient } from '@/utils/supabase/client'
 import { Button } from '@/components/ui/button'
 import { LoadingSpinner } from '@/components/ui/loading-spinner'
-import { formatCurrency, formatDate } from '@/lib/utils'
-import { FileText, Download, Eye, Trash2 } from 'lucide-react'
+import { formatCurrency, formatDate, formatTitleCaseName } from '@/lib/utils'
+import { FileText, Download, Eye, Trash2, CheckCircle2, Clock3, TriangleAlert } from 'lucide-react'
 import Link from 'next/link'
 import type { Invoice } from '@/types/database'
+import { useRouter } from 'next/navigation'
 
 export function InvoiceList() {
   const [invoices, setInvoices] = useState<Invoice[]>([])
@@ -15,6 +16,11 @@ export function InvoiceList() {
   const [filter, setFilter] = useState<'all' | 'completed' | 'processing' | 'error'>('all')
   const [searchTerm, setSearchTerm] = useState('')
   const [selected, setSelected] = useState<Record<string, boolean>>({})
+  const [sortKey, setSortKey] = useState<'date'|'supplier'|'code'|'subtotal'|'total'|'status'>('date')
+  const [sortDir, setSortDir] = useState<'asc'|'desc'>('desc')
+  const [page, setPage] = useState(1)
+  const [pageSize, setPageSize] = useState(20)
+  const router = useRouter()
 
   const formatShortDate = (iso?: string) => {
     if (!iso) return '—'
@@ -43,8 +49,7 @@ export function InvoiceList() {
 
       let query = supabase
         .from('invoices')
-        .select('*')
-        .eq('user_id', user.id)
+        .select('id, file_name, file_path, created_at, status, extracted_data, user_id, organization_id, supplier_id, supplier:suppliers ( id, code, display_name )')
         .order('created_at', { ascending: false })
 
       if (filter !== 'all') {
@@ -81,6 +86,8 @@ export function InvoiceList() {
             inv.mime_type,
             ed.invoice_number,
             ed.supplier_name,
+            inv?.supplier?.display_name,
+            inv?.supplier?.code,
             ed.client_name,
             ...items.map((it: any) => it?.description)
           ]
@@ -111,7 +118,7 @@ export function InvoiceList() {
         })
       }
 
-      setInvoices(data || [])
+      setInvoices(data as any || [])
     } catch (error) {
       console.error('Erreur lors du chargement des factures:', error)
     } finally {
@@ -138,11 +145,32 @@ export function InvoiceList() {
     }
   }
 
+  const handleBulkDelete = async () => {
+    const ids = Object.keys(selected).filter(id => selected[id])
+    if (ids.length === 0) return
+    if (!confirm(`Supprimer ${ids.length} facture(s) ?`)) return
+
+    try {
+      const supabase = createClient()
+      const { error } = await supabase
+        .from('invoices')
+        .delete()
+        .in('id', ids)
+      if (error) throw error
+      setInvoices(prev => prev.filter(inv => !ids.includes((inv as any).id)))
+      setSelected({})
+    } catch (error) {
+      console.error('Erreur suppression multiple:', error)
+      alert('Erreur lors de la suppression multiple')
+    }
+  }
+
   const handleView = async (filePath: string) => {
     try {
       const supabase = createClient()
-      const { data } = supabase.storage.from('invoices').getPublicUrl(filePath)
-      const url = data.publicUrl
+      const { data, error } = await (supabase.storage.from('invoices') as any).createSignedUrl(filePath, 60)
+      if (error) throw error
+      const url = data?.signedUrl
       if (!url) throw new Error('URL introuvable')
       window.open(url, '_blank', 'noopener,noreferrer')
     } catch (error) {
@@ -169,6 +197,27 @@ export function InvoiceList() {
     }
   }
 
+  // Téléchargement direct (URL publique avec paramètre download)
+  const handleDirectDownload = async (filePath: string, fileName: string) => {
+    try {
+      const supabase = createClient()
+      const { data, error } = await (supabase.storage.from('invoices') as any).createSignedUrl(filePath, 60, { download: fileName })
+      if (error) throw error
+      const url = data?.signedUrl
+      if (!url) throw new Error('URL introuvable')
+      const a = document.createElement('a')
+      a.href = url
+      a.download = fileName
+      a.rel = 'noopener'
+      document.body.appendChild(a)
+      a.click()
+      a.remove()
+    } catch (error) {
+      console.error('Erreur téléchargement direct:', error)
+      alert('Impossible de télécharger la facture')
+    }
+  }
+
   const getStatusBadge = (status: string) => {
     const styles = {
       pending: 'bg-yellow-100 text-yellow-800',
@@ -191,18 +240,60 @@ export function InvoiceList() {
     )
   }
 
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center py-12">
-        <LoadingSpinner size="lg" />
-      </div>
-    )
+  const statusIcon = (status: string) => {
+    switch (status) {
+      case 'completed':
+        return <CheckCircle2 className="h-4 w-4 text-green-600" />
+      case 'processing':
+        return <Clock3 className="h-4 w-4 text-blue-600" />
+      case 'error':
+        return <TriangleAlert className="h-4 w-4 text-red-600" />
+      default:
+        return <Clock3 className="h-4 w-4 text-gray-400" />
+    }
   }
 
   const toggleAll = (checked: boolean) => {
     const next: Record<string, boolean> = {}
     invoices.forEach((i) => (next[i.id] = checked))
     setSelected(next)
+  }
+
+  // Tri + pagination (calculés une seule fois par changement d'état)
+  const sortedInvoices = useMemo(() => {
+    const getKey = (inv: any) => {
+      const ed: any = inv.extracted_data || {}
+      switch (sortKey) {
+        case 'supplier': return String(inv?.supplier?.display_name || ed.supplier_name || '').toLowerCase()
+        case 'code': return String(inv?.supplier?.code || '')
+        case 'subtotal': return Number(ed.subtotal || 0)
+        case 'total': return Number(ed.total_amount || 0)
+        case 'status': return String(inv.status)
+        case 'date':
+        default: return new Date(ed.invoice_date || inv.created_at || 0).getTime()
+      }
+    }
+    const arr = [...invoices]
+    arr.sort((a: any, b: any) => {
+      const av = getKey(a)
+      const bv = getKey(b)
+      if (typeof av === 'number' && typeof bv === 'number') return sortDir === 'asc' ? av - bv : bv - av
+      return sortDir === 'asc' ? String(av).localeCompare(String(bv)) : String(bv).localeCompare(String(av))
+    })
+    return arr
+  }, [invoices, sortKey, sortDir])
+
+  const pagedInvoices = useMemo(() => {
+    const start = (page - 1) * pageSize
+    return sortedInvoices.slice(start, start + pageSize)
+  }, [sortedInvoices, page, pageSize])
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center py-12">
+        <LoadingSpinner size="lg" />
+      </div>
+    )
   }
 
   return (
@@ -216,6 +307,9 @@ export function InvoiceList() {
             placeholder="Rechercher (fichier, fournisseur, n° facture, montant…)"
             className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary"
           />
+          {searchTerm && (
+            <button onClick={() => setSearchTerm('')} className="absolute right-2 top-2 text-xs text-gray-500 hover:text-gray-800">Effacer</button>
+          )}
         </div>
         <div className="flex items-center space-x-2">
           {[
@@ -233,6 +327,7 @@ export function InvoiceList() {
               {label}
             </Button>
           ))}
+          <Button variant="outline" size="sm" onClick={handleBulkDelete} disabled={Object.values(selected).filter(Boolean).length===0}>Supprimer sélection</Button>
         </div>
       </div>
 
@@ -246,15 +341,15 @@ export function InvoiceList() {
       ) : (
         <div className="overflow-auto border rounded-md bg-white">
           <table className="min-w-full text-xs">
-            <thead className="bg-gray-50">
+            <thead className="bg-gray-50 sticky top-0 z-10">
               <tr>
                 <th className="px-2 py-1"><input type="checkbox" onChange={(e) => toggleAll(e.target.checked)} /></th>
                 <th className="px-2 py-1 text-left">Rang</th>
                 <th className="px-2 py-1 text-left w-[420px]">Nom</th>
-                <th className="px-2 py-1 text-left w-[260px]">Fournisseur</th>
-                <th className="px-2 py-1 text-left">Date document</th>
-                <th className="px-2 py-1 text-right">Montant de base</th>
-                <th className="px-2 py-1 text-right">Montant total</th>
+                <th className="px-2 py-1 text-left w-[260px] cursor-pointer" onClick={() => { setSortKey('supplier'); setSortDir(sortKey==='supplier' && sortDir==='asc' ? 'desc' : 'asc') }}>Fournisseur</th>
+                <th className="px-2 py-1 text-left cursor-pointer" onClick={() => { setSortKey('date'); setSortDir(sortKey==='date' && sortDir==='asc' ? 'desc' : 'asc') }}>Date document</th>
+                <th className="px-2 py-1 text-right cursor-pointer" onClick={() => { setSortKey('subtotal'); setSortDir(sortKey==='subtotal' && sortDir==='asc' ? 'desc' : 'asc') }}>Montant de base</th>
+                <th className="px-2 py-1 text-right cursor-pointer" onClick={() => { setSortKey('total'); setSortDir(sortKey==='total' && sortDir==='asc' ? 'desc' : 'asc') }}>Montant total</th>
                 <th className="px-2 py-1 text-left">Devise</th>
                 <th className="px-2 py-1 text-left">Statut</th>
                 <th className="px-2 py-1 text-left">Créé le</th>
@@ -262,15 +357,20 @@ export function InvoiceList() {
               </tr>
             </thead>
             <tbody>
-              {invoices.map((inv, idx) => {
+              {pagedInvoices.map((inv, idx) => {
                 const ed: any = inv.extracted_data || {}
                 const fileNameDisplay = truncate(inv.file_name, 40)
-                const supplierDisplay = truncate(String(ed.supplier_name || ''), 30)
+                const supplierDisplay = truncate(formatTitleCaseName(String(inv?.supplier?.display_name || ed.supplier_name || '')), 30)
                 const invoiceNumberDisplay = truncate(String(ed.invoice_number || ''), 20)
+                const rowIndex = (page - 1) * pageSize + idx + 1
                 return (
-                  <tr key={inv.id} className="border-t">
+                  <tr key={inv.id} className="border-t odd:bg-gray-50 hover:bg-blue-50/40 cursor-pointer" onClick={(e) => {
+                    const tag = (e.target as HTMLElement).tagName
+                    if (['INPUT', 'BUTTON', 'A', 'SVG', 'PATH'].includes(tag)) return
+                    router.push(`/invoices/${inv.id}`)
+                  }}>
                     <td className="px-2 py-1"><input type="checkbox" checked={!!selected[inv.id]} onChange={(e) => setSelected({ ...selected, [inv.id]: e.target.checked })} /></td>
-                    <td className="px-2 py-1">{idx + 1}</td>
+                    <td className="px-2 py-1">{rowIndex}</td>
                     <td className="px-2 py-1 w-[420px]">
                       <div className="flex items-center space-x-1.5">
                         <FileText className="h-3 w-3 text-gray-400" />
@@ -288,17 +388,17 @@ export function InvoiceList() {
                     <td className="px-2 py-1 text-right">{ed.subtotal ? formatCurrency(ed.subtotal) : '—'}</td>
                     <td className="px-2 py-1 text-right">{ed.total_amount ? formatCurrency(ed.total_amount) : '—'}</td>
                     <td className="px-2 py-1">{ed.currency || '—'}</td>
-                    <td className="px-2 py-1">{getStatusBadge(inv.status)}</td>
+                    <td className="px-2 py-1">{statusIcon(inv.status)}</td>
                     <td className="px-2 py-1">{formatShortDate(inv.created_at)}</td>
                     <td className="px-2 py-1 text-right">
                       <div className="flex justify-end space-x-1">
-                        <Button variant="outline" size="sm" className="h-7" onClick={() => handleView(inv.file_path)}>
+                        <Button title="Voir" variant="outline" size="sm" className="h-7" onClick={(e) => { e.stopPropagation(); handleView(inv.file_path) }}>
                           <Eye className="h-3 w-3" />
                         </Button>
-                        <Button variant="outline" size="sm" className="h-7" onClick={() => handleDownload(inv.file_path, inv.file_name)}>
+                        <Button title="Télécharger" variant="outline" size="sm" className="h-7" onClick={(e) => { e.stopPropagation(); handleDirectDownload(inv.file_path, inv.file_name) }}>
                           <Download className="h-3 w-3" />
                         </Button>
-                        <Button variant="outline" size="sm" className="text-red-600 hover:text-red-700 h-7" onClick={() => handleDelete(inv.id)}>
+                        <Button title="Supprimer" variant="outline" size="sm" className="text-red-600 hover:text-red-700 h-7" onClick={(e) => { e.stopPropagation(); handleDelete(inv.id) }}>
                           <Trash2 className="h-3 w-3" />
                         </Button>
                       </div>
@@ -308,6 +408,23 @@ export function InvoiceList() {
               })}
             </tbody>
           </table>
+          {invoices.length > pageSize && (
+            <div className="flex items-center justify-between p-2 text-xs border-t bg-gray-50">
+              <div className="flex items-center space-x-2">
+                <span className="text-gray-600">Lignes par page</span>
+                <select className="border rounded px-1 py-0.5" value={pageSize} onChange={(e) => { setPageSize(Number(e.target.value)); setPage(1) }}>
+                  {[10,20,50,100].map(n => <option key={n} value={n}>{n}</option>)}
+                </select>
+              </div>
+              <div className="text-gray-600">
+                {Math.min((page-1)*pageSize+1, invoices.length)}–{Math.min(page*pageSize, invoices.length)} sur {invoices.length}
+              </div>
+              <div className="space-x-1">
+                <Button size="sm" variant="outline" onClick={() => setPage(p => Math.max(1, p-1))}>Préc.</Button>
+                <Button size="sm" variant="outline" onClick={() => setPage(p => (p*pageSize < invoices.length ? p+1 : p))}>Suiv.</Button>
+              </div>
+            </div>
+          )}
         </div>
       )}
     </div>
