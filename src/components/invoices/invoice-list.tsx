@@ -7,11 +7,10 @@ import { LoadingSpinner } from '@/components/ui/loading-spinner'
 import { formatCurrency, formatDate, formatTitleCaseName } from '@/lib/utils'
 import { FileText, Download, Eye, Trash2, CheckCircle2, Clock3, TriangleAlert } from 'lucide-react'
 import Link from 'next/link'
-import type { Invoice } from '@/types/database'
 import { useRouter } from 'next/navigation'
 
 export function InvoiceList() {
-  const [invoices, setInvoices] = useState<Invoice[]>([])
+  const [invoices, setInvoices] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
   const [filter, setFilter] = useState<'all' | 'completed' | 'processing' | 'error'>('all')
   const [searchTerm, setSearchTerm] = useState('')
