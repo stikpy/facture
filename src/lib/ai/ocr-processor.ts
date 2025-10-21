@@ -65,7 +65,16 @@ export class OCRProcessor {
         return [text]
       }
       
-      // Sinon, retourner ce qu'on a (même vide) - le worker pourra marquer comme "needs manual OCR"
+      // Sinon, tenter l'OCR sur le PDF scanné
+      console.log('[OCR] pdf-parse vide, tentative OCR fallback...')
+      const ocrTexts = await this.ocrPdfPages(pdfBuffer)
+      console.log('[OCR] Fallback PDF OCR pages count:', ocrTexts.length)
+      
+      if (ocrTexts.length > 0) {
+        return ocrTexts
+      }
+      
+      // Si échec complet, retourner vide
       return [text]
     } catch (error) {
       console.error('Erreur traitement PDF:', error)
@@ -82,83 +91,53 @@ export class OCRProcessor {
 
   private async ocrPdfPages(pdfBuffer: Buffer): Promise<string[]> {
     try {
-      // Désactiver temporairement le fallback OCR PDF pour simplifier
-      console.warn('[OCR] Fallback PDF OCR désactivé - utiliser uniquement pdf-parse')
-      return []
+      console.log('[OCR] Tentative OCR sur PDF scanné via pdf-to-png + Tesseract')
       
-      // Code fallback (à réactiver plus tard si besoin)
-      /*
-      let pdfjsLib: any
-      try {
-        pdfjsLib = require('pdfjs-dist/legacy/build/pdf.js')
-      } catch (_) {
-        pdfjsLib = require('pdfjs-dist/build/pdf.js')
-      }
-
-      let CanvasNode: any = null
-      try { CanvasNode = require('canvas') } catch (_) {}
-      const Offscreen = (global as any).OffscreenCanvas || null
-      if (!CanvasNode && !Offscreen) {
-        console.warn('Aucun moteur de canvas disponible')
+      // Convertir première page PDF → PNG via pdf-to-png
+      const { pdfToPng } = require('pdf-to-png-converter')
+      const pngPages = await pdfToPng(pdfBuffer, {
+        disableFontFace: false,
+        useSystemFonts: false,
+        viewportScale: 2.0,
+        outputFolder: undefined, // En mémoire
+        strictPagesToProcess: false,
+        verbosityLevel: 0,
+        pagesToProcess: [1, 2] // Première et deuxième page max
+      })
+      
+      console.log(`[OCR] ${pngPages.length} pages PNG générées`)
+      
+      if (!pngPages || pngPages.length === 0) {
+        console.warn('[OCR] Aucune page PNG générée')
         return []
       }
-      */
-
-      // Canvas factory pour pdfjs sous Node
-      class NodeCanvasFactory {
-        create(width: number, height: number) {
-          const canvas = CanvasNode ? CanvasNode.createCanvas(width, height) : new Offscreen(width, height)
-          const context = canvas.getContext('2d')
-          return { canvas, context }
-        }
-        reset(canvasAndContext: any, width: number, height: number) {
-          canvasAndContext.canvas.width = width
-          canvasAndContext.canvas.height = height
-        }
-        destroy(canvasAndContext: any) {
-          canvasAndContext.canvas.width = 0
-          canvasAndContext.canvas.height = 0
-          // @ts-ignore
-          canvasAndContext.canvas = null
-          // @ts-ignore
-          canvasAndContext.context = null
-        }
-      }
-
-      const loadingTask = pdfjsLib.getDocument({ data: pdfBuffer })
-      const doc = await loadingTask.promise
-      const maxPages = Math.min(doc.numPages, Number(process.env.OCR_PDF_MAX_PAGES || 2))
-
+      
+      // OCR sur chaque page PNG
       await this.initialize()
       const pageTexts: string[] = []
-
-      for (let p = 1; p <= maxPages; p++) {
-        const page = await doc.getPage(p)
-        const viewport = page.getViewport({ scale: 2.0 })
-        const factory = new NodeCanvasFactory()
-        const { canvas, context } = factory.create(viewport.width, viewport.height)
-        const renderContext = {
-          canvasContext: context,
-          viewport,
-          canvasFactory: factory,
-        }
-        await page.render(renderContext as any).promise
-        let pngBuffer: Buffer
-        if (CanvasNode && canvas.toBuffer) {
-          pngBuffer = canvas.toBuffer('image/png')
-        } else {
-          const blob = await canvas.convertToBlob?.({ type: 'image/png' })
-          const arrayBuffer = blob ? await blob.arrayBuffer() : new ArrayBuffer(0)
-          pngBuffer = Buffer.from(new Uint8Array(arrayBuffer))
-        }
-        // OCR sur l'image rendue
+      
+      for (let i = 0; i < Math.min(pngPages.length, 3); i++) {
+        const page = pngPages[i]
+        console.log(`[OCR] Traitement page ${i + 1}, taille: ${page.content?.length || 0} bytes`)
+        
+        if (!page.content) continue
+        
+        // Optimiser l'image pour OCR
+        const optimized = await this.optimizeImageForOCR(page.content)
+        
+        // Extraire le texte
         if (!this.worker) await this.initialize()
-        const optimized = await this.optimizeImageForOCR(pngBuffer)
-        const { data: { text } } = await (this.worker as Tesseract.Worker).recognize(optimized)
-        const t = String(text || '').trim()
-        if (t) pageTexts.push(t)
-        factory.destroy({ canvas, context })
+        const { data: { text } } = await (this.worker as any).recognize(optimized)
+        const cleanText = String(text || '').trim()
+        
+        console.log(`[OCR] Page ${i + 1} texte extrait (taille): ${cleanText.length}`)
+        
+        if (cleanText && cleanText.length > 10) {
+          pageTexts.push(cleanText)
+        }
       }
+      
+      console.log(`[OCR] Total pages OCR réussies: ${pageTexts.length}`)
       return pageTexts
     } catch (e) {
       console.warn('OCR PDF fallback échec:', e)

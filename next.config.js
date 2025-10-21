@@ -2,7 +2,7 @@
 const path = require('path')
 const nextConfig = {
   outputFileTracingRoot: path.join(__dirname),
-  serverExternalPackages: ['sharp', 'pdf-parse', 'tesseract.js', 'pdfjs-dist'],
+  serverExternalPackages: ['sharp', 'pdf-parse', 'tesseract.js', 'pdfjs-dist', 'pdf-to-png-converter'],
   images: {
     domains: ['localhost'],
     formats: ['image/webp', 'image/avif']
