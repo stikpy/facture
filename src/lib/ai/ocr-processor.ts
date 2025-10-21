@@ -4,6 +4,7 @@ import { ExtractedInvoiceData } from '@/types/invoice'
 
 export class OCRProcessor {
   private worker: Tesseract.Worker | null = null
+  private lastAlternatives: Array<{rotation: number, score: number, text: string}> = []
 
   async initialize() {
     if (!this.worker) {
@@ -11,6 +12,10 @@ export class OCRProcessor {
         logger: m => console.log(m)
       })
     }
+  }
+
+  getAlternativeRotations(): Array<{rotation: number, score: number, text: string}> {
+    return this.lastAlternatives
   }
 
   async processImage(imageBuffer: Buffer): Promise<string> {
@@ -72,8 +77,9 @@ export class OCRProcessor {
       console.log('[OCR] Fallback PDF OCR pages count:', ocrResult.texts.length)
       
       // Stocker les rotations alternatives pour fallback si extraction échoue
-      if (ocrResult.alternativeRotations && ocrResult.alternativeRotations.length > 0) {
-        console.log('[OCR] Rotations alternatives disponibles:', ocrResult.alternativeRotations.map(r => `${r.rotation}° (score: ${r.score})`).join(', '))
+      this.lastAlternatives = ocrResult.alternativeRotations || []
+      if (this.lastAlternatives.length > 0) {
+        console.log('[OCR] Rotations alternatives disponibles:', this.lastAlternatives.map(r => `${r.rotation}° (score: ${r.score})`).join(', '))
       }
       
       if (ocrResult.texts.length > 0) {

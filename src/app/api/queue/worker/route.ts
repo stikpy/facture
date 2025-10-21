@@ -69,6 +69,7 @@ export async function GET(request: NextRequest) {
       console.log('[WORKER] Buffer téléchargé (bytes):', fileBuffer?.length)
 
       let extractedText = ''
+      let alternativeTexts: Array<{rotation: number, score: number, text: string}> = []
 
       // Extraction de texte selon le type
       if ((invoice as any).mime_type === 'application/pdf') {
@@ -77,6 +78,13 @@ export async function GET(request: NextRequest) {
         const texts = await ocrProcessor.processPDF(fileBuffer)
         console.log('[WORKER] OCR PDF textes (n):', texts.length, 'tailles:', texts.map(t => t?.length))
         extractedText = texts.join('\n')
+        
+        // Récupérer les rotations alternatives
+        alternativeTexts = ocrProcessor.getAlternativeRotations()
+        if (alternativeTexts.length > 0) {
+          console.log('[WORKER] Rotations alternatives récupérées:', alternativeTexts.length)
+        }
+        
         await ocrProcessor.terminate()
       } else if ((invoice as any).mime_type.startsWith('image/')) {
         console.log('🖼️ [WORKER] Traitement image avec OCR')
@@ -115,11 +123,42 @@ export async function GET(request: NextRequest) {
         })
       }
 
-      // Traitement IA
+      // Traitement IA (avec retry sur rotations alternatives si extraction vide)
       console.log('🤖 [WORKER] Traitement IA')
       const documentProcessor = new DocumentProcessor()
-      const extractedData = await documentProcessor.processDocument(extractedText, (invoice as any).file_name)
-      const classification = await documentProcessor.classifyInvoice(extractedData)
+      let extractedData = await documentProcessor.processDocument(extractedText, (invoice as any).file_name)
+      let classification = await documentProcessor.classifyInvoice(extractedData)
+      
+      // Vérifier si l'extraction a échoué (tous les champs importants sont null)
+      const isExtractionEmpty = !extractedData.invoice_number && 
+                                !extractedData.total_amount && 
+                                !extractedData.supplier_name &&
+                                (!extractedData.items || extractedData.items.length === 0)
+      
+      if (isExtractionEmpty && alternativeTexts.length > 0) {
+        console.warn('⚠️ [WORKER] Extraction vide, tentative avec rotations alternatives...')
+        
+        for (let i = 0; i < Math.min(alternativeTexts.length, 2); i++) {
+          const alt = alternativeTexts[i]
+          console.log(`🔄 [WORKER] Retry ${i + 1}/${alternativeTexts.length} avec rotation ${alt.rotation}° (score: ${alt.score})`)
+          
+          const retryData = await documentProcessor.processDocument(alt.text, (invoice as any).file_name)
+          const retryIsEmpty = !retryData.invoice_number && 
+                               !retryData.total_amount && 
+                               !retryData.supplier_name &&
+                               (!retryData.items || retryData.items.length === 0)
+          
+          if (!retryIsEmpty) {
+            console.log(`✅ [WORKER] Extraction réussie avec rotation ${alt.rotation}°`)
+            extractedData = retryData
+            classification = await documentProcessor.classifyInvoice(extractedData)
+            break
+          } else {
+            console.log(`❌ [WORKER] Retry ${i + 1} toujours vide`)
+          }
+        }
+      }
+      
       console.log('[WORKER] Classification:', classification)
       console.log('[WORKER] ===== DONNÉES EXTRAITES =====')
       console.log(JSON.stringify(extractedData, null, 2))
