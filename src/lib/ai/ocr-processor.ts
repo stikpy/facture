@@ -99,7 +99,7 @@ export class OCRProcessor {
       const pngPages = await pdfToPng(pdfBuffer, {
         disableFontFace: false,
         useSystemFonts: false,
-        viewportScale: 2.0,
+        viewportScale: 3.0, // Augmenté pour meilleure qualité
         outputFolder: undefined, // En mémoire
         strictPagesToProcess: false,
         verbosityLevel: 0,
@@ -123,10 +123,19 @@ export class OCRProcessor {
         
         if (!page.content) continue
         
-        // Tester plusieurs rotations et garder la meilleure
-        const rotations = [0, 90, 180, 270]
+        // Détecter l'orientation du PDF via dimensions
+        const metadata = await sharp(page.content).metadata()
+        const isLandscape = metadata.width && metadata.height && metadata.width > metadata.height
+        
+        console.log(`[OCR] Dimensions: ${metadata.width}x${metadata.height}, format: ${isLandscape ? 'paysage' : 'portrait'}`)
+        
+        // Ordre de priorité : 90° pour paysage scanné en portrait, sinon 0° d'abord
+        const rotations = isLandscape ? [90, 270, 0, 180] : [0, 90, 270, 180]
         let bestText = ''
         let bestRotation = 0
+        let bestScore = 0
+        
+        console.log(`[OCR] Test des rotations dans l'ordre: ${rotations.join('°, ')}°`)
         
         for (const angle of rotations) {
           try {
@@ -142,20 +151,30 @@ export class OCRProcessor {
             const { data: { text } } = await (this.worker as any).recognize(rotated)
             const cleanText = String(text || '').trim()
             
-            if (cleanText.length > bestText.length) {
+            // Score basé sur : longueur + nombre de mots valides (>2 chars)
+            const words = cleanText.split(/\s+/).filter(w => w.length > 2)
+            const score = cleanText.length + (words.length * 10)
+            
+            console.log(`[OCR]   → ${angle}°: ${cleanText.length} chars, ${words.length} mots, score=${score}`)
+            
+            if (score > bestScore) {
               bestText = cleanText
               bestRotation = angle
+              bestScore = score
             }
             
-            // Si on a trouvé un bon résultat, pas besoin de tester toutes les rotations
-            if (cleanText.length > 500) break
+            // Si score très bon (>1000 chars + mots), arrêter
+            if (score > 1000) {
+              console.log(`[OCR]   ✓ Score excellent (${score}), arrêt des tests`)
+              break
+            }
           } catch (err) {
             console.warn(`[OCR] Erreur rotation ${angle}°:`, err)
           }
         }
         
-        console.log(`[OCR] Page ${i + 1} meilleure rotation: ${bestRotation}°, texte extrait (taille): ${bestText.length}`)
-        console.log(`[OCR] Aperçu texte page ${i + 1}:`, bestText.substring(0, 300))
+        console.log(`[OCR] ✅ Meilleure rotation: ${bestRotation}°, score: ${bestScore}, texte (taille): ${bestText.length}`)
+        console.log(`[OCR] Aperçu texte page ${i + 1}:`, bestText.substring(0, 400))
         
         if (bestText && bestText.length > 10) {
           pageTexts.push(bestText)
