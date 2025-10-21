@@ -96,6 +96,11 @@ export async function PUT(
     const body = await request.json()
     const { supplier_name, supplier_id, description, allocations,
       client_name, invoice_number, invoice_date, due_date, subtotal, tax_amount, total_amount } = body || {}
+    
+    console.log('🔍 [API] === DÉBUT PUT /api/invoices/' + invoiceId + ' ===')
+    console.log('🔍 [API] Body reçu:', JSON.stringify(body, null, 2))
+    console.log('🔍 [API] Allocations extraites:', allocations)
+    console.log('🔍 [API] Nombre d\'allocations reçues:', allocations?.length || 0)
 
     // 1) Charger la facture
     const { data: invoice, error: invErr } = await (supabaseAdmin
@@ -161,13 +166,24 @@ export async function PUT(
     } catch {}
 
     // 5) Réécrire la ventilation
+    console.log('🔍 [API] Allocations reçues:', allocations)
+    console.log('🔍 [API] Invoice ID:', invoiceId)
+    console.log('🔍 [API] User ID:', user.id)
     if (Array.isArray(allocations)) {
       try {
-        const { error: delErr } = await supabaseAdmin
+        console.log('🔍 [API] Suppression des anciennes allocations...')
+        const { data: delData, error: delErr } = await supabaseAdmin
           .from('invoice_allocations')
           .delete()
           .eq('invoice_id', invoiceId)
-        if (delErr) throw delErr
+          .eq('user_id', user.id)
+          .select()
+        if (delErr) {
+          console.error('❌ [API] Erreur suppression:', delErr)
+          throw delErr
+        }
+        console.log('✅ [API] Anciennes allocations supprimées:', delData?.length || 0, 'lignes')
+        console.log('🔍 [API] Détail des allocations supprimées:', delData)
 
         if (allocations.length > 0) {
           const rows = allocations.map((a: any) => ({
@@ -176,20 +192,37 @@ export async function PUT(
             account_code: String(a.account_code || ''),
             label: a.label ? String(a.label) : null,
             amount: Number(a.amount || 0),
+            vat_code: a.vat_code ? String(a.vat_code) : null,
+            vat_rate: a.vat_rate != null ? Number(a.vat_rate) : null,
           }))
-          const { error: insErr } = await ((supabaseAdmin as any)
+          console.log('🔍 [API] Nouvelles allocations à insérer:', rows)
+          
+          const { data: insData, error: insErr } = await ((supabaseAdmin as any)
             .from('invoice_allocations')
-            .insert(rows as any))
-          if (insErr) throw insErr
+            .insert(rows as any)
+            .select())
+          if (insErr) {
+            console.error('❌ [API] Erreur insertion:', insErr)
+            throw insErr
+          }
+          console.log('✅ [API] Allocations insérées avec succès:', insData?.length || 0, 'lignes')
+          console.log('🔍 [API] Détail des allocations insérées:', insData)
+        } else {
+          console.log('⚠️ [API] Aucune allocation à insérer')
         }
       } catch (e: any) {
+        console.error('❌ [API] Erreur ventilations:', e)
         if (!String(e?.message || '').includes('invoice_allocations')) {
           return NextResponse.json({ error: e.message || 'Erreur inconnue' }, { status: 500 })
         }
         // Si la table n'existe pas, on enregistre quand même la mise à jour des métadonnées
+        console.log('⚠️ [API] Table invoice_allocations n\'existe pas, ignoré')
       }
+    } else {
+      console.log('⚠️ [API] Allocations n\'est pas un tableau:', typeof allocations)
     }
 
+    console.log('✅ [API] === FIN PUT /api/invoices/' + invoiceId + ' - SUCCÈS ===')
     return NextResponse.json({ success: true })
   } catch (e: any) {
     return NextResponse.json({ error: e.message || 'Erreur serveur' }, { status: 500 })

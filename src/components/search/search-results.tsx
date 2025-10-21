@@ -6,7 +6,9 @@ import { SearchBar } from './search-bar'
 import { LoadingSpinner } from '@/components/ui/loading-spinner'
 import { formatCurrency, formatDate, formatTitleCaseName } from '@/lib/utils'
 import { FileText, Search } from 'lucide-react'
-import type { Invoice } from '@/types/database'
+import type { Database } from '@/types/database'
+
+type Invoice = Database['public']['Tables']['invoices']['Row']
 
 interface SearchResult {
   invoice: Invoice
@@ -161,7 +163,7 @@ export function SearchResults() {
                   </div>
                   
                   <div className="flex items-center space-x-2">
-                    {getStatusBadge(result.invoice.status)}
+                    {getStatusBadge(result.invoice.status || 'pending')}
                     {result.relevanceScore && (
                       <span className="text-xs text-gray-500">
                         {Math.round(result.relevanceScore * 100)}% de pertinence
