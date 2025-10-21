@@ -68,11 +68,16 @@ export class OCRProcessor {
       
       // Sinon, tenter l'OCR sur le PDF scanné
       console.log('[OCR] pdf-parse vide, tentative OCR fallback...')
-      const ocrTexts = await this.ocrPdfPages(pdfBuffer)
-      console.log('[OCR] Fallback PDF OCR pages count:', ocrTexts.length)
+      const ocrResult = await this.ocrPdfPages(pdfBuffer)
+      console.log('[OCR] Fallback PDF OCR pages count:', ocrResult.texts.length)
       
-      if (ocrTexts.length > 0) {
-        return ocrTexts
+      // Stocker les rotations alternatives pour fallback si extraction échoue
+      if (ocrResult.alternativeRotations && ocrResult.alternativeRotations.length > 0) {
+        console.log('[OCR] Rotations alternatives disponibles:', ocrResult.alternativeRotations.map(r => `${r.rotation}° (score: ${r.score})`).join(', '))
+      }
+      
+      if (ocrResult.texts.length > 0) {
+        return ocrResult.texts
       }
       
       // Si échec complet, retourner vide
@@ -90,7 +95,7 @@ export class OCRProcessor {
     }
   }
 
-  private async ocrPdfPages(pdfBuffer: Buffer): Promise<string[]> {
+  private async ocrPdfPages(pdfBuffer: Buffer): Promise<{ texts: string[], alternativeRotations?: Array<{rotation: number, score: number, text: string}> }> {
     try {
       console.log('[OCR] Tentative OCR sur PDF scanné via pdf-to-png + Tesseract')
       
@@ -110,12 +115,13 @@ export class OCRProcessor {
       
       if (!pngPages || pngPages.length === 0) {
         console.warn('[OCR] Aucune page PNG générée')
-        return []
+        return { texts: [] }
       }
       
       // OCR sur chaque page PNG avec test de rotation
       await this.initialize()
       const pageTexts: string[] = []
+      const allRotationResults: Array<{rotation: number, score: number, text: string}> = []
       
       for (let i = 0; i < Math.min(pngPages.length, 2); i++) {
         const page = pngPages[i]
@@ -131,6 +137,7 @@ export class OCRProcessor {
         
         // TOUJOURS tester toutes les rotations pour trouver la meilleure
         const rotations = [0, 90, 180, 270]
+        const rotationResults: Array<{rotation: number, score: number, text: string}> = []
         let bestText = ''
         let bestRotation = 0
         let bestScore = 0
@@ -158,6 +165,9 @@ export class OCRProcessor {
             
             console.log(`[OCR]   → ${angle}°: ${cleanText.length} chars, ${words.length} mots valides, ${symbols} symboles, score=${score}`)
             
+            // Stocker tous les résultats de rotation
+            rotationResults.push({ rotation: angle, score, text: cleanText })
+            
             if (score > bestScore) {
               bestText = cleanText
               bestRotation = angle
@@ -180,13 +190,24 @@ export class OCRProcessor {
         if (bestText && bestText.length > 10) {
           pageTexts.push(bestText)
         }
+        
+        // Garder les rotations alternatives (triées par score décroissant, exclure la meilleure)
+        const alternatives = rotationResults
+          .filter(r => r.rotation !== bestRotation && r.text.length > 10)
+          .sort((a, b) => b.score - a.score)
+          .slice(0, 2) // Garder max 2 alternatives
+        
+        allRotationResults.push(...alternatives)
       }
       
       console.log(`[OCR] Total pages OCR réussies: ${pageTexts.length}`)
-      return pageTexts
+      return { 
+        texts: pageTexts,
+        alternativeRotations: allRotationResults.length > 0 ? allRotationResults : undefined
+      }
     } catch (e) {
       console.warn('OCR PDF fallback échec:', e)
-      return []
+      return { texts: [] }
     }
   }
 }
