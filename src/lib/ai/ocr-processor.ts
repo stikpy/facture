@@ -39,6 +39,7 @@ export class OCRProcessor {
   private async optimizeImageForOCR(buffer: Buffer): Promise<Buffer> {
     try {
       return await sharp(buffer)
+        .rotate() // Auto-rotation basée sur EXIF orientation
         .greyscale()
         .normalize()
         .sharpen()
@@ -112,28 +113,52 @@ export class OCRProcessor {
         return []
       }
       
-      // OCR sur chaque page PNG
+      // OCR sur chaque page PNG avec test de rotation
       await this.initialize()
       const pageTexts: string[] = []
       
-      for (let i = 0; i < Math.min(pngPages.length, 3); i++) {
+      for (let i = 0; i < Math.min(pngPages.length, 2); i++) {
         const page = pngPages[i]
         console.log(`[OCR] Traitement page ${i + 1}, taille: ${page.content?.length || 0} bytes`)
         
         if (!page.content) continue
         
-        // Optimiser l'image pour OCR
-        const optimized = await this.optimizeImageForOCR(page.content)
+        // Tester plusieurs rotations et garder la meilleure
+        const rotations = [0, 90, 180, 270]
+        let bestText = ''
+        let bestRotation = 0
         
-        // Extraire le texte
-        if (!this.worker) await this.initialize()
-        const { data: { text } } = await (this.worker as any).recognize(optimized)
-        const cleanText = String(text || '').trim()
+        for (const angle of rotations) {
+          try {
+            const rotated = await sharp(page.content)
+              .rotate(angle)
+              .greyscale()
+              .normalize()
+              .sharpen()
+              .png()
+              .toBuffer()
+            
+            if (!this.worker) await this.initialize()
+            const { data: { text } } = await (this.worker as any).recognize(rotated)
+            const cleanText = String(text || '').trim()
+            
+            if (cleanText.length > bestText.length) {
+              bestText = cleanText
+              bestRotation = angle
+            }
+            
+            // Si on a trouvé un bon résultat, pas besoin de tester toutes les rotations
+            if (cleanText.length > 500) break
+          } catch (err) {
+            console.warn(`[OCR] Erreur rotation ${angle}°:`, err)
+          }
+        }
         
-        console.log(`[OCR] Page ${i + 1} texte extrait (taille): ${cleanText.length}`)
+        console.log(`[OCR] Page ${i + 1} meilleure rotation: ${bestRotation}°, texte extrait (taille): ${bestText.length}`)
+        console.log(`[OCR] Aperçu texte page ${i + 1}:`, bestText.substring(0, 300))
         
-        if (cleanText && cleanText.length > 10) {
-          pageTexts.push(cleanText)
+        if (bestText && bestText.length > 10) {
+          pageTexts.push(bestText)
         }
       }
       

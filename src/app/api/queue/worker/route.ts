@@ -121,6 +121,9 @@ export async function GET(request: NextRequest) {
       const extractedData = await documentProcessor.processDocument(extractedText, (invoice as any).file_name)
       const classification = await documentProcessor.classifyInvoice(extractedData)
       console.log('[WORKER] Classification:', classification)
+      console.log('[WORKER] ===== DONNÉES EXTRAITES =====')
+      console.log(JSON.stringify(extractedData, null, 2))
+      console.log('[WORKER] ==============================')
 
       // Sauvegarder les résultats
       console.log('💾 [WORKER] Sauvegarde des résultats')
