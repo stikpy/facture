@@ -129,13 +129,13 @@ export class OCRProcessor {
         
         console.log(`[OCR] Dimensions: ${metadata.width}x${metadata.height}, format: ${isLandscape ? 'paysage' : 'portrait'}`)
         
-        // Ordre de priorité : 90° pour paysage scanné en portrait, sinon 0° d'abord
-        const rotations = isLandscape ? [90, 270, 0, 180] : [0, 90, 270, 180]
+        // TOUJOURS tester toutes les rotations pour trouver la meilleure
+        const rotations = [0, 90, 180, 270]
         let bestText = ''
         let bestRotation = 0
         let bestScore = 0
         
-        console.log(`[OCR] Test des rotations dans l'ordre: ${rotations.join('°, ')}°`)
+        console.log(`[OCR] Test des 4 rotations pour trouver la meilleure qualité`)
         
         for (const angle of rotations) {
           try {
@@ -151,22 +151,17 @@ export class OCRProcessor {
             const { data: { text } } = await (this.worker as any).recognize(rotated)
             const cleanText = String(text || '').trim()
             
-            // Score basé sur : longueur + nombre de mots valides (>2 chars)
-            const words = cleanText.split(/\s+/).filter(w => w.length > 2)
-            const score = cleanText.length + (words.length * 10)
+            // Score basé sur : longueur + nombre de mots valides (>2 chars) - pénalité pour symboles
+            const words = cleanText.split(/\s+/).filter(w => w.length > 2 && /^[a-zA-ZÀ-ÿ0-9]+$/.test(w))
+            const symbols = (cleanText.match(/[£€@#%&*=|]/g) || []).length
+            const score = cleanText.length + (words.length * 20) - (symbols * 5)
             
-            console.log(`[OCR]   → ${angle}°: ${cleanText.length} chars, ${words.length} mots, score=${score}`)
+            console.log(`[OCR]   → ${angle}°: ${cleanText.length} chars, ${words.length} mots valides, ${symbols} symboles, score=${score}`)
             
             if (score > bestScore) {
               bestText = cleanText
               bestRotation = angle
               bestScore = score
-            }
-            
-            // Si score très bon (>1000 chars + mots), arrêter
-            if (score > 1000) {
-              console.log(`[OCR]   ✓ Score excellent (${score}), arrêt des tests`)
-              break
             }
           } catch (err) {
             console.warn(`[OCR] Erreur rotation ${angle}°:`, err)
