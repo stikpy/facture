@@ -135,7 +135,7 @@ export class OCRProcessor {
         let bestRotation = 0
         let bestScore = 0
         
-        console.log(`[OCR] Test des 4 rotations pour trouver la meilleure qualité`)
+        console.log(`[OCR] Test des rotations pour trouver la meilleure qualité (arrêt si score excellent)`)
         
         for (const angle of rotations) {
           try {
@@ -162,6 +162,12 @@ export class OCRProcessor {
               bestText = cleanText
               bestRotation = angle
               bestScore = score
+            }
+            
+            // Si score excellent (beaucoup de mots valides, peu de symboles), arrêter
+            if (words.length > 50 && symbols < 10 && score > 1500) {
+              console.log(`[OCR]   ✓ Score excellent (${score}), arrêt des tests`)
+              break
             }
           } catch (err) {
             console.warn(`[OCR] Erreur rotation ${angle}°:`, err)
