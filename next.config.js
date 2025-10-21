@@ -1,6 +1,8 @@
 /** @type {import('next').NextConfig} */
+const path = require('path')
 const nextConfig = {
-  serverExternalPackages: ['sharp', 'pdf-parse', 'tesseract.js'],
+  outputFileTracingRoot: path.join(__dirname),
+  serverExternalPackages: ['sharp', 'pdf-parse', 'tesseract.js', 'pdfjs-dist'],
   images: {
     domains: ['localhost'],
     formats: ['image/webp', 'image/avif']

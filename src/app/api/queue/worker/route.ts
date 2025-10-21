@@ -5,9 +5,11 @@ import { DocumentProcessor } from '@/lib/ai/document-processor'
 import { OCRProcessor } from '@/lib/ai/ocr-processor'
 
 export const maxDuration = 300 // 5 minutes max pour Vercel
+export const runtime = 'nodejs'
 
 export async function GET(request: NextRequest) {
   console.log('🔄 [WORKER] Démarrage du worker')
+  const startedAt = Date.now()
   
   try {
     // Récupérer la prochaine tâche à traiter
@@ -27,6 +29,12 @@ export async function GET(request: NextRequest) {
     }
 
     console.log(`🎯 [WORKER] Traitement de la tâche ${(task as any).id} pour la facture ${(task as any).invoice_id}`)
+    console.log('[WORKER] Tâche:', {
+      id: (task as any).id,
+      invoiceId: (task as any).invoice_id,
+      attempts: (task as any).attempts,
+      created_at: (task as any).created_at
+    })
 
     // Marquer la tâche comme en cours
     await (supabaseAdmin as any)
@@ -46,11 +54,19 @@ export async function GET(request: NextRequest) {
 
     try {
       const invoice = (task as any).invoices
+      console.log('[WORKER] Facture:', {
+        id: (invoice as any).id,
+        file_name: (invoice as any).file_name,
+        file_path: (invoice as any).file_path,
+        mime_type: (invoice as any).mime_type,
+        organization_id: (invoice as any).organization_id
+      })
 
       // Télécharger le fichier
       console.log(`📥 [WORKER] Téléchargement du fichier: ${(invoice as any).file_path}`)
       const storageService = new StorageService()
       const fileBuffer = await storageService.downloadFile((invoice as any).file_path)
+      console.log('[WORKER] Buffer téléchargé (bytes):', fileBuffer?.length)
 
       let extractedText = ''
 
@@ -59,6 +75,7 @@ export async function GET(request: NextRequest) {
         console.log('📄 [WORKER] Traitement PDF avec OCR')
         const ocrProcessor = new OCRProcessor()
         const texts = await ocrProcessor.processPDF(fileBuffer)
+        console.log('[WORKER] OCR PDF textes (n):', texts.length, 'tailles:', texts.map(t => t?.length))
         extractedText = texts.join('\n')
         await ocrProcessor.terminate()
       } else if ((invoice as any).mime_type.startsWith('image/')) {
@@ -68,8 +85,34 @@ export async function GET(request: NextRequest) {
         await ocrProcessor.terminate()
       }
 
+      console.log('[WORKER] Taille texte extrait:', extractedText?.length)
       if (!extractedText.trim()) {
-        throw new Error('Aucun texte extrait du document')
+        console.warn('[WORKER] PDF scanné sans texte - marquage pour OCR manuel')
+        // Marquer comme "needs_manual_ocr" au lieu de throw
+        await (supabaseAdmin as any)
+          .from('invoices')
+          .update({
+            status: 'error',
+            extracted_data: { 
+              error: 'PDF scanné - OCR manuel requis',
+              note: 'Ce document nécessite un traitement OCR avancé ou une extraction manuelle'
+            }
+          } as any)
+          .eq('id', (task as any).invoice_id)
+        
+        await (supabaseAdmin as any)
+          .from('processing_queue')
+          .update({
+            status: 'failed',
+            error_message: 'PDF scanné - OCR manuel requis'
+          } as any)
+          .eq('id', (task as any).id)
+        
+        return NextResponse.json({
+          success: false,
+          message: 'PDF scanné - nécessite OCR manuel',
+          invoiceId: (task as any).invoice_id
+        })
       }
 
       // Traitement IA
@@ -77,6 +120,7 @@ export async function GET(request: NextRequest) {
       const documentProcessor = new DocumentProcessor()
       const extractedData = await documentProcessor.processDocument(extractedText, (invoice as any).file_name)
       const classification = await documentProcessor.classifyInvoice(extractedData)
+      console.log('[WORKER] Classification:', classification)
 
       // Sauvegarder les résultats
       console.log('💾 [WORKER] Sauvegarde des résultats')

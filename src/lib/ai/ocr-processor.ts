@@ -23,9 +23,11 @@ export class OCRProcessor {
 
       // Optimiser l'image pour l'OCR
       const optimizedBuffer = await this.optimizeImageForOCR(imageBuffer)
+      console.log('[OCR] Image optimisée (bytes):', optimizedBuffer?.length)
       
       // Extraire le texte
       const { data: { text } } = await this.worker.recognize(optimizedBuffer)
+      console.log('[OCR] Texte image (taille):', String(text||'').length)
       
       return text
     } catch (error) {
@@ -56,14 +58,15 @@ export class OCRProcessor {
       // Pour les PDF avec images, on pourrait ajouter l'extraction d'images
       // et les traiter avec l'OCR
       const text = String(data?.text || '').trim()
+      console.log('[OCR] pdf-parse texte (taille):', text.length)
+      
+      // Si pdf-parse renvoie du contenu, l'utiliser directement
       if (text && text.length > 30) {
         return [text]
       }
-
-      // Fallback OCR: rendre les 2-3 premières pages en images puis OCR
-      const ocrTexts = await this.ocrPdfPages(pdfBuffer)
-      if (ocrTexts.length > 0) return ocrTexts
-      return [text] // même si vide, pour éviter throw
+      
+      // Sinon, retourner ce qu'on a (même vide) - le worker pourra marquer comme "needs manual OCR"
+      return [text]
     } catch (error) {
       console.error('Erreur traitement PDF:', error)
       throw new Error('Impossible de traiter le PDF')
@@ -79,19 +82,32 @@ export class OCRProcessor {
 
   private async ocrPdfPages(pdfBuffer: Buffer): Promise<string[]> {
     try {
-      // Importer dynamiquement pour éviter erreurs d'env si non dispo
-      const pdfjsLib = require('pdfjs-dist/legacy/build/pdf.js')
-      // Utiliser OffscreenCanvas si disponible (Edge runtime) sinon désactiver fallback
-      const CanvasImpl: any = (global as any).OffscreenCanvas || null
-      if (!CanvasImpl) {
-        console.warn('OffscreenCanvas indisponible - OCR PDF fallback désactivé')
+      // Désactiver temporairement le fallback OCR PDF pour simplifier
+      console.warn('[OCR] Fallback PDF OCR désactivé - utiliser uniquement pdf-parse')
+      return []
+      
+      // Code fallback (à réactiver plus tard si besoin)
+      /*
+      let pdfjsLib: any
+      try {
+        pdfjsLib = require('pdfjs-dist/legacy/build/pdf.js')
+      } catch (_) {
+        pdfjsLib = require('pdfjs-dist/build/pdf.js')
+      }
+
+      let CanvasNode: any = null
+      try { CanvasNode = require('canvas') } catch (_) {}
+      const Offscreen = (global as any).OffscreenCanvas || null
+      if (!CanvasNode && !Offscreen) {
+        console.warn('Aucun moteur de canvas disponible')
         return []
       }
+      */
 
       // Canvas factory pour pdfjs sous Node
       class NodeCanvasFactory {
         create(width: number, height: number) {
-          const canvas = new CanvasImpl(width, height)
+          const canvas = CanvasNode ? CanvasNode.createCanvas(width, height) : new Offscreen(width, height)
           const context = canvas.getContext('2d')
           return { canvas, context }
         }
@@ -127,9 +143,14 @@ export class OCRProcessor {
           canvasFactory: factory,
         }
         await page.render(renderContext as any).promise
-        const blob = await canvas.convertToBlob?.({ type: 'image/png' })
-        const arrayBuffer = blob ? await blob.arrayBuffer() : new ArrayBuffer(0)
-        const pngBuffer: Buffer = Buffer.from(new Uint8Array(arrayBuffer))
+        let pngBuffer: Buffer
+        if (CanvasNode && canvas.toBuffer) {
+          pngBuffer = canvas.toBuffer('image/png')
+        } else {
+          const blob = await canvas.convertToBlob?.({ type: 'image/png' })
+          const arrayBuffer = blob ? await blob.arrayBuffer() : new ArrayBuffer(0)
+          pngBuffer = Buffer.from(new Uint8Array(arrayBuffer))
+        }
         // OCR sur l'image rendue
         if (!this.worker) await this.initialize()
         const optimized = await this.optimizeImageForOCR(pngBuffer)
