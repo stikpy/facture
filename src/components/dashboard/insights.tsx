@@ -71,19 +71,24 @@ export function Insights({ filters }: { filters?: Filters }) {
     if (filters?.group === 'month' && filters?.from && filters?.to) {
       const start = new Date(filters.from)
       const end = new Date(filters.to)
-      const yStart = start.getFullYear()
-      const yEnd = end.getFullYear()
-      if (yStart === yEnd) {
-        for (let m = 0; m < 12; m++) {
-          const key = `${yStart}-${String(m + 1).padStart(2, '0')}`
-          labels.push(String(m + 1).padStart(2, '0'))
-          values.push(map.get(key) || 0)
-        }
+      const months: string[] = []
+      const cur = new Date(start.getFullYear(), start.getMonth(), 1)
+      // Génère la séquence mois entre start et end inclus (cap 24)
+      let guard = 0
+      while (cur <= end && guard < 24) {
+        const key = `${cur.getFullYear()}-${String(cur.getMonth() + 1).padStart(2, '0')}`
+        months.push(key)
+        cur.setMonth(cur.getMonth() + 1)
+        guard++
       }
+      // Si pas de mois générés (sécurité), tomber sur 12 mois de l'année du start
+      const seq = months.length ? months : Array.from({ length: 12 }, (_, i) => `${start.getFullYear()}-${String(i + 1).padStart(2, '0')}`)
+      labels = seq.map(k => k.slice(5)) // n'afficher que MM
+      values = seq.map(k => map.get(k) || 0)
     }
     if (!labels.length) {
       // Fallback: use whatever periods are present
-      labels = series.map(s => s.period)
+      labels = series.map(s => (s.period || '').slice(5))
       values = series.map(s => s.total)
     }
     const max = Math.max(0, ...values)
@@ -107,6 +112,8 @@ export function Insights({ filters }: { filters?: Filters }) {
         ) : filters?.group === 'month' ? (
           // Bar chart for month-by-month
           <svg viewBox="0 0 240 90" className="w-full h-24">
+            {/* axe X */}
+            <line x1="0" y1="80" x2="240" y2="80" stroke="#e5e7eb" strokeWidth="1" />
             {monthly.values.map((v, i) => {
               const barW = 240 / Math.max(12, monthly.values.length)
               const h = monthly.max > 0 ? (v / monthly.max) * 70 : 0
