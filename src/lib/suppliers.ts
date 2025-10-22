@@ -89,12 +89,17 @@ export async function upsertSupplier(displayName: string, organizationId?: strin
     
     if (match) {
       console.log(`✅ [SUPPLIERS] Correspondance floue trouvée pour "${displayName}" → "${(match as any).display_name}" (${Math.round(((match as any).similarity || 0) * 100)}% similaire)`)
-      // Enregistrer l'alias pour les prochaines fois
-      await (supabaseAdmin as any)
-        .from('supplier_aliases')
-        .insert({ supplier_id: (match as any).id, alias_key: key } as any)
-        .onConflict('supplier_id,alias_key')
-        .ignore?.()
+      // Enregistrer l'alias pour les prochaines fois (ignore les doublons)
+      try {
+        await (supabaseAdmin as any)
+          .from('supplier_aliases')
+          .insert({ supplier_id: (match as any).id, alias_key: key } as any)
+      } catch (e) {
+        // Ignorer les erreurs de doublons silencieusement
+        if (!(e as any)?.code === '23505') {
+          console.warn('⚠️ [SUPPLIERS] Erreur lors de la création de l\'alias:', e)
+        }
+      }
       return match
     }
     
@@ -144,12 +149,17 @@ export async function upsertSupplier(displayName: string, organizationId?: strin
   
   console.log(`✅ [SUPPLIERS] Nouveau fournisseur créé avec succès: ${inserted.display_name} (${inserted.code})`)
   
-  // Créer l'alias d'entrée pour capturer la variante initiale
-  await (supabaseAdmin as any)
-    .from('supplier_aliases')
-    .insert({ supplier_id: (inserted as any).id, alias_key: key } as any)
-    .onConflict('supplier_id,alias_key')
-    .ignore?.()
+  // Créer l'alias d'entrée pour capturer la variante initiale (ignore les doublons)
+  try {
+    await (supabaseAdmin as any)
+      .from('supplier_aliases')
+      .insert({ supplier_id: (inserted as any).id, alias_key: key } as any)
+  } catch (e) {
+    // Ignorer les erreurs de doublons (contrainte unique sur supplier_id + alias_key)
+    if (!(e as any)?.code === '23505') {
+      console.warn('⚠️ [SUPPLIERS] Erreur lors de la création de l\'alias:', e)
+    }
+  }
   
   return inserted
 }
