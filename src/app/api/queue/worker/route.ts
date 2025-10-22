@@ -75,6 +75,7 @@ export async function GET(request: NextRequest) {
       console.log('[WORKER] Buffer téléchargé (bytes):', fileBuffer?.length)
 
       let extractedText = ''
+      let pageTexts: string[] = []
       let alternativeTexts: Array<{rotation: number, score: number, text: string}> = []
 
       // Extraction de texte selon le type
@@ -84,6 +85,7 @@ export async function GET(request: NextRequest) {
         const texts = await ocrProcessor.processPDF(fileBuffer)
         console.log('[WORKER] OCR PDF textes (n):', texts.length, 'tailles:', texts.map(t => t?.length))
         extractedText = texts.join('\n')
+        pageTexts = texts
         
         // Récupérer les rotations alternatives
         alternativeTexts = ocrProcessor.getAlternativeRotations()
@@ -163,6 +165,25 @@ export async function GET(request: NextRequest) {
             console.log(`❌ [WORKER] Retry ${i + 1} toujours vide`)
           }
         }
+      }
+
+      // Si nous avons des textes page par page, faire un enrichissement par page et fusionner les items
+      if (pageTexts && pageTexts.length > 1) {
+        console.log('[WORKER] Enrichissement page-à-page et fusion des lignes…')
+        for (let i = 0; i < pageTexts.length; i++) {
+          const pageText = pageTexts[i]
+          try {
+            const perPage = await documentProcessor.processDocument(pageText, `${(invoice as any).file_name}#p${i+1}`)
+            if (perPage?.items?.length) {
+              const current = Array.isArray(extractedData.items) ? extractedData.items : []
+              extractedData.items = [...current, ...perPage.items]
+            }
+          } catch (e) {
+            console.warn(`[WORKER] Enrichissement page ${i+1} ignoré:`, e)
+          }
+        }
+        // Recalcul de classification après fusion
+        classification = await documentProcessor.classifyInvoice(extractedData)
       }
       
       console.log('[WORKER] Classification:', classification)
