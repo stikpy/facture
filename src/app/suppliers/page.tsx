@@ -167,6 +167,20 @@ export default function SuppliersPage() {
       console.log(`🗑️ [SUPPLIERS] Suppression du fournisseur ${supplierId}`)
       
       const supabase = createClient()
+      // 1) Détacher les factures liées si besoin (supplier_id -> null)
+      try {
+        const { error: detachError } = await (supabase as any)
+          .from('invoices')
+          .update({ supplier_id: null } as any)
+          .eq('supplier_id', supplierId)
+        if (detachError) {
+          console.warn('⚠️ [SUPPLIERS] Impossible de détacher les factures avant suppression:', detachError)
+        }
+      } catch (e) {
+        console.warn('⚠️ [SUPPLIERS] Erreur inattendue lors du détachement des factures:', e)
+      }
+
+      // 2) Supprimer le fournisseur
       const { error } = await (supabase as any)
         .from('suppliers')
         .delete()
