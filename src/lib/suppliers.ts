@@ -95,8 +95,10 @@ export async function upsertSupplier(displayName: string, organizationId?: strin
           .from('supplier_aliases')
           .insert({ supplier_id: (match as any).id, alias_key: key } as any)
       } catch (e) {
-        // Ignorer les erreurs de doublons silencieusement
-        if (!(e as any)?.code === '23505') {
+        // Ignorer uniquement l'erreur de doublon (23505)
+        const code = (e as any)?.code || (e as any)?.hint || ''
+        const isDuplicate = String(code).includes('23505')
+        if (!isDuplicate) {
           console.warn('⚠️ [SUPPLIERS] Erreur lors de la création de l\'alias:', e)
         }
       }
@@ -155,8 +157,10 @@ export async function upsertSupplier(displayName: string, organizationId?: strin
       .from('supplier_aliases')
       .insert({ supplier_id: (inserted as any).id, alias_key: key } as any)
   } catch (e) {
-    // Ignorer les erreurs de doublons (contrainte unique sur supplier_id + alias_key)
-    if (!(e as any)?.code === '23505') {
+    // Ignorer uniquement l'erreur de doublon (23505)
+    const code = (e as any)?.code || (e as any)?.hint || ''
+    const isDuplicate = String(code).includes('23505')
+    if (!isDuplicate) {
       console.warn('⚠️ [SUPPLIERS] Erreur lors de la création de l\'alias:', e)
     }
   }
