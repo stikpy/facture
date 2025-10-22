@@ -181,7 +181,31 @@ export async function GET(request: NextRequest) {
             status: 'completed'
           } as any)
           .eq('id', (task as any).invoice_id)
-        if (error) throw new Error(`DB update invoices->completed: ${error.message}`)
+        if (error) {
+          // Gère les doublons de numéro de facture (contrainte unique côté BDD)
+          if ((error as any).code === '23505' || String(error.message || '').includes('uniq_invoice_per_user_number')) {
+            console.warn('⚠️ [WORKER] Doublon numéro de facture détecté, marquage en erreur')
+            await (supabaseAdmin as any)
+              .from('invoices')
+              .update({
+                status: 'error',
+                extracted_data: {
+                  ...(extractedData as any),
+                  duplicate: true,
+                  error: 'Doublon: ce numéro de facture existe déjà pour cet utilisateur'
+                }
+              } as any)
+              .eq('id', (task as any).invoice_id)
+
+            await (supabaseAdmin as any)
+              .from('processing_queue')
+              .update({ status: 'failed', error_message: 'duplicate_invoice_number' } as any)
+              .eq('id', (task as any).id)
+
+            return NextResponse.json({ success: false, duplicate: true })
+          }
+          throw new Error(`DB update invoices->completed: ${error.message}`)
+        }
       }
 
       // Créer les articles de facture
