@@ -44,7 +44,9 @@ export async function GET(request: NextRequest) {
         })
       }
 
-      return NextResponse.json({ error: 'Facture introuvable' }, { status: 404 })
+      // Si la facture n'est pas encore visible (latence d'écriture),
+      // renvoyer un statut "pending" plutôt qu'une erreur dure
+      return NextResponse.json({ status: 'pending', hasTask: false }, { status: 200 })
     }
 
     return NextResponse.json({

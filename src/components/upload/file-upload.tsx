@@ -178,7 +178,9 @@ export function FileUpload() {
         })
 
         if (!statusResponse.ok) {
-          throw new Error('Erreur lors de la récupération du statut')
+          // On ne casse pas le flux: marquer en processing et re-essayer
+          updateFileStatus(fileId, 'processing', 60)
+          return setTimeout(poll, 3000)
         }
 
         const statusData = await statusResponse.json()
