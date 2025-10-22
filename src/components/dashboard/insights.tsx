@@ -58,12 +58,44 @@ export function Insights({ filters }: { filters?: Filters }) {
     return { path: d, min, max }
   }, [series])
 
+  // Month-by-month normalized series for a bar chart when group is 'month'
+  const monthly = useMemo(() => {
+    if (!series.length) return { labels: [] as string[], values: [] as number[], max: 0 }
+    // Build a map YYYY-MM -> total
+    const map = new Map<string, number>()
+    for (const p of series) map.set(p.period, (map.get(p.period) || 0) + Number(p.total || 0))
+
+    // If a yearly view is requested, make sure we output 12 months with 0 for missing
+    let labels: string[] = []
+    let values: number[] = []
+    if (filters?.group === 'month' && filters?.from && filters?.to) {
+      const start = new Date(filters.from)
+      const end = new Date(filters.to)
+      const yStart = start.getFullYear()
+      const yEnd = end.getFullYear()
+      if (yStart === yEnd) {
+        for (let m = 0; m < 12; m++) {
+          const key = `${yStart}-${String(m + 1).padStart(2, '0')}`
+          labels.push(String(m + 1).padStart(2, '0'))
+          values.push(map.get(key) || 0)
+        }
+      }
+    }
+    if (!labels.length) {
+      // Fallback: use whatever periods are present
+      labels = series.map(s => s.period)
+      values = series.map(s => s.total)
+    }
+    const max = Math.max(0, ...values)
+    return { labels, values, max }
+  }, [series, filters?.group, filters?.from, filters?.to])
+
   return (
     <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
       {/* Courbe dépenses */}
       <div className="bg-white p-6 rounded-lg shadow">
         <div className="flex items-center justify-between mb-3">
-          <h3 className="text-sm font-semibold text-gray-900">Dépenses récentes</h3>
+          <h3 className="text-sm font-semibold text-gray-900">Dépenses</h3>
           {!loading && series.length > 0 && (
             <div className="text-xs text-gray-500">{series[0].period} → {series[series.length - 1].period}</div>
           )}
@@ -72,7 +104,25 @@ export function Insights({ filters }: { filters?: Filters }) {
           <div className="h-16 bg-gray-100 animate-pulse rounded" />
         ) : series.length === 0 ? (
           <div className="text-sm text-gray-500">Aucune donnée</div>
+        ) : filters?.group === 'month' ? (
+          // Bar chart for month-by-month
+          <svg viewBox="0 0 240 90" className="w-full h-24">
+            {monthly.values.map((v, i) => {
+              const barW = 240 / Math.max(12, monthly.values.length)
+              const h = monthly.max > 0 ? (v / monthly.max) * 70 : 0
+              const x = i * barW + 2
+              const y = 80 - h
+              return (
+                <g key={i}>
+                  <rect x={x} y={y} width={barW - 4} height={h} fill="#2563eb" opacity={0.8} />
+                  {/* month label */}
+                  <text x={x + (barW - 4) / 2} y={88} textAnchor="middle" fontSize="8" fill="#6b7280">{monthly.labels[i]}</text>
+                </g>
+              )
+            })}
+          </svg>
         ) : (
+          // Sparkline for recent periods (days or custom chunks)
           <svg viewBox="0 0 220 60" className="w-full h-16">
             <path d={spark.path} fill="none" stroke="#2563eb" strokeWidth="2" />
           </svg>
