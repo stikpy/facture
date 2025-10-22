@@ -95,6 +95,7 @@ export class DocumentProcessor {
            - Si supplier_name = client_name → ERREUR! Relisez attentivement le document
            - Le nom du fichier peut contenir un indice sur le fournisseur
            - Cherchez les RIB/IBAN → ils appartiennent au FOURNISSEUR (qui reçoit le paiement)
+           - Si incertain pour l'adresse/TVA du fournisseur, LAISSEZ CES CHAMPS VIDES
         
         Contexte: {context}
         
@@ -107,10 +108,10 @@ export class DocumentProcessor {
           "tax_amount": montant_tva_numerique,
           "subtotal": sous_total_numerique,
           "supplier_name": "nom EXACT et COMPLET du fournisseur (ZONE ÉMETTEUR en haut du document)",
-          "supplier_address": "adresse complète du fournisseur",
+          "supplier_address": "adresse complète du fournisseur (laisser vide si incertain)",
           "supplier_email": "email du fournisseur",
           "supplier_phone": "téléphone du fournisseur",
-          "supplier_vat_number": "numéro TVA/SIRET du fournisseur",
+          "supplier_vat_number": "numéro TVA/SIRET du fournisseur (laisser vide si incertain)",
           "client_name": "nom EXACT du client (ZONE DESTINATAIRE, mention 'Facturé à')",
           "client_address": "adresse complète du client",
           "client_email": "email du client",

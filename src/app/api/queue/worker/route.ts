@@ -217,6 +217,26 @@ export async function GET(request: NextRequest) {
       console.log(JSON.stringify(extractedData, null, 2))
       console.log('[WORKER] ==============================')
 
+      // Nettoyage supplémentaire: éviter d'enregistrer l'adresse/TVA du CLIENT dans les champs fournisseur si l'IA s'est trompée
+      try {
+        const ed: any = extractedData || {}
+        if (ed.supplier_name && ed.client_name) {
+          const s = String(ed.supplier_name).toLowerCase().trim()
+          const c = String(ed.client_name).toLowerCase().trim()
+          if (s === c) {
+            // On a déjà corrigé le nom; pour les méta (adresse/TVA), si elles sont identiques côté client, on les vide
+            if (ed.supplier_address && ed.client_address && String(ed.supplier_address).toLowerCase().trim() === String(ed.client_address).toLowerCase().trim()) {
+              ed.supplier_address = undefined
+            }
+            if (ed.supplier_vat_number && ed.client_vat_number && String(ed.supplier_vat_number).toLowerCase().trim() === String(ed.client_vat_number).toLowerCase().trim()) {
+              ed.supplier_vat_number = undefined
+            }
+          }
+        }
+      } catch (e) {
+        console.warn('[WORKER] Nettoyage supplier/client ignoré:', e)
+      }
+
       // Upsert supplier avec organization_id de la facture
       let supplierId: string | null = null
       try {

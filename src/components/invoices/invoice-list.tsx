@@ -48,7 +48,7 @@ export function InvoiceList({ from, to }: { from?: string; to?: string }) {
 
       let query = supabase
         .from('invoices')
-        .select('id, file_name, file_path, created_at, status, extracted_data, user_id, organization_id, supplier_id, supplier:suppliers ( id, code, display_name )')
+        .select('id, file_name, file_path, created_at, status, extracted_data, user_id, organization_id, supplier_id, supplier:suppliers ( id, code, display_name, validation_status, is_active )')
         .order('created_at', { ascending: false })
 
       if (filter !== 'all') {
