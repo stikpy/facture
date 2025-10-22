@@ -236,26 +236,39 @@ export default function SuppliersPage() {
        // console.log('🔍 [SUPPLIERS] Show inactive:', showInactive) // Colonne is_active n'existe pas
       
       const supabaseClient = createClient()
-      
-      // Test avec une requête plus simple d'abord
-      console.log('🔍 [SUPPLIERS] Test de connexion Supabase...')
-      const { data: testData, error: testError } = await (supabaseClient as any)
-        .from('suppliers')
-        .select('id, display_name, code')
-        .limit(5)
-      
-      console.log('🔍 [SUPPLIERS] Test simple:', { testData, testError })
-      
-      if (testError) {
-        console.error('❌ [SUPPLIERS] Erreur sur requête simple:', testError)
-        throw testError
+
+      // Déterminer l'organisation active
+      let orgId: string | null = null
+      try {
+        const { data: member } = await (supabaseClient as any)
+          .from('organization_members')
+          .select('organization_id')
+          .eq('user_id', user.id)
+          .limit(1)
+          .single()
+        orgId = member?.organization_id || null
+        console.log('🏢 [SUPPLIERS] Organisation active (members):', orgId)
+      } catch (e) {
+        const { data: userRow } = await (supabaseClient as any)
+          .from('users')
+          .select('organization_id')
+          .eq('id', user.id)
+          .single()
+        orgId = userRow?.organization_id || null
+        console.log('🏢 [SUPPLIERS] Organisation active (users):', orgId)
       }
-      
-       // Si le test simple fonctionne, faire la vraie requête
-       const { data, error } = await (supabaseClient as any)
-         .from('suppliers')
-         .select('*')
-         .order('display_name')
+
+      // Requête principale, scopée à l'organisation si disponible
+      let query = (supabaseClient as any)
+        .from('suppliers')
+        .select('*')
+        .order('display_name')
+
+      if (orgId) {
+        query = query.eq('organization_id', orgId)
+      }
+
+      const { data, error } = await query
 
       console.log('🔍 [SUPPLIERS] Réponse Supabase:', { data, error })
 
