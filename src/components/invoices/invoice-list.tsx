@@ -45,9 +45,7 @@ export function InvoiceList({ from, to }: { from?: string; to?: string }) {
       const supabase = createClient()
       const { data: { user } } = await supabase.auth.getUser()
       if (!user) return
-
-      const { data: { user } } = await supabase.auth.getUser()
-      const orgId = user ? await getActiveOrganizationId(supabase, user.id) : null
+      const orgId = await getActiveOrganizationId(supabase, user.id)
 
       let query = supabase
         .from('invoices')
