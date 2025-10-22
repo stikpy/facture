@@ -111,6 +111,30 @@ export async function POST(request: NextRequest) {
       const extractedData = await documentProcessor.processDocument(extractedText, fileName)
       console.log('✅ [SERVER] Données extraites par l\'IA:', extractedData)
       
+      // POST-VALIDATION: Vérifier que fournisseur ≠ client
+      if ((extractedData as any)?.supplier_name && (extractedData as any)?.client_name) {
+        const supplierNorm = String((extractedData as any).supplier_name).toLowerCase().trim()
+        const clientNorm = String((extractedData as any).client_name).toLowerCase().trim()
+        
+        if (supplierNorm === clientNorm) {
+          console.warn('⚠️ [SERVER] ERREUR DÉTECTÉE: supplier_name = client_name!')
+          console.warn(`⚠️ [SERVER] Valeur incorrecte: "${(extractedData as any).supplier_name}"`)
+          console.warn('⚠️ [SERVER] Tentative de correction automatique...')
+          
+          // Essayer d'extraire le nom du fournisseur depuis le nom du fichier
+          const fileNameMatch = fileName.match(/^([^-]+)/)
+          if (fileNameMatch && fileNameMatch[1]) {
+            const supplierFromFileName = fileNameMatch[1].trim()
+            console.log(`🔧 [SERVER] Extraction du fournisseur depuis le nom du fichier: "${supplierFromFileName}"`)
+            ;(extractedData as any).supplier_name = supplierFromFileName
+            console.log(`✅ [SERVER] Correction appliquée: supplier_name = "${supplierFromFileName}"`)
+          } else {
+            console.error('❌ [SERVER] Impossible de corriger automatiquement, fournisseur invalide')
+            ;(extractedData as any).supplier_name = 'FOURNISSEUR INCONNU - À VÉRIFIER'
+          }
+        }
+      }
+      
       const classification = await documentProcessor.classifyInvoice(extractedData)
       console.log('✅ [SERVER] Classification:', classification)
 
