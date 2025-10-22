@@ -180,7 +180,8 @@ export function FileUpload() {
         if (!statusResponse.ok) {
           // On ne casse pas le flux: marquer en processing et re-essayer
           updateFileStatus(fileId, 'processing', 60)
-          return setTimeout(poll, 3000)
+          setTimeout(poll, 3000)
+          return
         }
 
         const statusData = await statusResponse.json()
