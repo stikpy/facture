@@ -65,7 +65,21 @@ export async function GET(
       }
     }
 
-    return NextResponse.json({ invoice, allocations })
+    // Charger le fournisseur avec son statut de validation
+    let supplier = null
+    if ((invoice as any).supplier_id) {
+      const { data: supplierData } = await supabaseAdmin
+        .from('suppliers')
+        .select('id, code, display_name, validation_status, is_active')
+        .eq('id', (invoice as any).supplier_id)
+        .single()
+      supplier = supplierData
+    }
+
+    return NextResponse.json({ 
+      invoice: { ...(invoice as any), supplier }, 
+      allocations 
+    })
   } catch (e: any) {
     return NextResponse.json({ error: e.message || 'Erreur serveur' }, { status: 500 })
   }

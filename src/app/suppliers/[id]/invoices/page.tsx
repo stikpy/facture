@@ -17,13 +17,23 @@ type Supplier = {
 
 type Invoice = {
   id: string
-  filename: string
+  file_name: string
   status: string
-  total_amount: number
-  invoice_date: string
-  due_date?: string
   created_at: string
-  extracted_data?: any
+  updated_at: string
+  extracted_data?: {
+    invoice_number?: string
+    invoice_date?: string
+    due_date?: string
+    total_amount?: number
+    subtotal?: number
+    tax_amount?: number
+    supplier_name?: string
+    currency?: string
+    [key: string]: any
+  }
+  supplier_id?: string
+  organization_id?: string
 }
 
 export default function SupplierInvoicesPage() {
@@ -74,42 +84,69 @@ export default function SupplierInvoicesPage() {
       setLoading(true)
       const supabase = createClient()
       
+      console.log('📦 [SUPPLIER INVOICES] Chargement du fournisseur:', supplierId)
+      
       // Charger le fournisseur
-      const { data: supplierData, error: supplierError } = await supabase
+      const { data: supplierData, error: supplierError } = await (supabase as any)
         .from('suppliers')
-        .select('id, display_name, code, email, phone')
+        .select('*')
         .eq('id', supplierId)
         .single()
 
+      console.log('🔍 [SUPPLIER INVOICES] Détails erreur:', { supplierError, supplierData })
+
       if (supplierError) {
-        console.error('Erreur lors du chargement du fournisseur:', supplierError)
+        console.error('❌ [SUPPLIER INVOICES] Erreur fournisseur:', supplierError)
+        console.error('❌ [SUPPLIER INVOICES] Détails:', {
+          message: supplierError.message,
+          details: supplierError.details,
+          hint: supplierError.hint,
+          code: supplierError.code
+        })
         return
       }
 
+      console.log('✅ [SUPPLIER INVOICES] Fournisseur chargé:', supplierData.display_name)
       setSupplier(supplierData)
 
       // Charger les factures du fournisseur
-      const { data: invoicesData, error: invoicesError } = await supabase
+      console.log('📄 [SUPPLIER INVOICES] Chargement des factures pour supplier_id:', supplierId)
+      const { data: invoicesData, error: invoicesError } = await (supabase as any)
         .from('invoices')
-        .select('id, filename, status, total_amount, invoice_date, due_date, created_at, extracted_data')
+        .select('*')
         .eq('supplier_id', supplierId)
         .order('created_at', { ascending: false })
 
+      console.log('📄 [SUPPLIER INVOICES] Réponse factures:', { 
+        count: invoicesData?.length || 0, 
+        error: invoicesError,
+        data: invoicesData 
+      })
+
       if (invoicesError) {
-        console.error('Erreur lors du chargement des factures:', invoicesError)
+        console.error('❌ [SUPPLIER INVOICES] Erreur factures:', invoicesError)
         return
       }
 
+      // Log des colonnes disponibles sur la première facture
+      if (invoicesData && invoicesData.length > 0) {
+        console.log('📋 [SUPPLIER INVOICES] Colonnes disponibles:', Object.keys(invoicesData[0]))
+        console.log('📋 [SUPPLIER INVOICES] Première facture:', invoicesData[0])
+        console.log('💰 [SUPPLIER INVOICES] extracted_data de la première facture:', invoicesData[0].extracted_data)
+        console.log('💰 [SUPPLIER INVOICES] Clés de extracted_data:', Object.keys(invoicesData[0].extracted_data || {}))
+      }
+
       setInvoices(invoicesData || [])
+      console.log(`✅ [SUPPLIER INVOICES] ${invoicesData?.length || 0} facture(s) chargée(s)`)
     } catch (error) {
-      console.error('Erreur lors du chargement:', error)
+      console.error('❌ [SUPPLIER INVOICES] Erreur générale:', error)
     } finally {
       setLoading(false)
     }
   }
 
   const filteredInvoices = invoices.filter(invoice =>
-    invoice.filename.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    invoice.file_name.toLowerCase().includes(searchTerm.toLowerCase()) ||
     invoice.status.toLowerCase().includes(searchTerm.toLowerCase()) ||
     (invoice.extracted_data?.invoice_number || '').toLowerCase().includes(searchTerm.toLowerCase())
   )
@@ -245,7 +282,7 @@ export default function SupplierInvoicesPage() {
                     <tr key={invoice.id} className="hover:bg-gray-50">
                       <td className="px-6 py-4 whitespace-nowrap">
                         <div className="text-sm font-medium text-gray-900">
-                          {invoice.filename}
+                          {invoice.file_name}
                         </div>
                         <div className="text-sm text-gray-500">
                           {formatDate(invoice.created_at)}
@@ -258,17 +295,17 @@ export default function SupplierInvoicesPage() {
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap">
                         <div className="text-sm text-gray-900">
-                          {invoice.invoice_date ? formatDate(invoice.invoice_date) : '-'}
+                          {invoice.extracted_data?.invoice_date ? formatDate(invoice.extracted_data.invoice_date) : '-'}
                         </div>
-                        {invoice.due_date && (
+                        {invoice.extracted_data?.due_date && (
                           <div className="text-sm text-gray-500">
-                            Échéance: {formatDate(invoice.due_date)}
+                            Échéance: {formatDate(invoice.extracted_data.due_date)}
                           </div>
                         )}
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap">
                         <div className="text-sm font-medium text-gray-900">
-                          {formatCurrency(invoice.total_amount)}
+                          {invoice.extracted_data?.total_amount ? formatCurrency(invoice.extracted_data.total_amount) : '-'}
                         </div>
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap">
@@ -290,7 +327,7 @@ export default function SupplierInvoicesPage() {
                             size="sm"
                             onClick={() => {
                               // TODO: Télécharger le fichier
-                              console.log('Télécharger:', invoice.filename)
+                              console.log('Télécharger:', invoice.file_name)
                             }}
                           >
                             Télécharger
@@ -317,7 +354,7 @@ export default function SupplierInvoicesPage() {
             <div className="bg-white rounded-lg shadow p-6">
               <h3 className="text-lg font-medium text-gray-900 mb-2">Montant total</h3>
               <p className="text-3xl font-bold text-green-600">
-                {formatCurrency(invoices.reduce((sum, invoice) => sum + invoice.total_amount, 0))}
+                {formatCurrency(invoices.reduce((sum, invoice) => sum + (invoice.extracted_data?.total_amount || 0), 0))}
               </p>
             </div>
             <div className="bg-white rounded-lg shadow p-6">

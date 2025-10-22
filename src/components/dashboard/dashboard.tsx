@@ -147,17 +147,16 @@ function computeFilters(range: 'month' | 'year', year?: number, month?: number) 
   const m = month ? month - 1 : now.getMonth()
   
   if (range === 'month') {
-    const fromDate = new Date(y, m, 1)
-    const toDate = new Date(y, m + 1, 0)
-    const from = fromDate.toISOString().slice(0,10)
-    const to = toDate.toISOString().slice(0,10)
+    // Premier jour du mois
+    const from = `${y}-${String(m + 1).padStart(2, '0')}-01`
+    // Dernier jour du mois
+    const lastDay = new Date(y, m + 1, 0).getDate()
+    const to = `${y}-${String(m + 1).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`
     return { from, to, group: 'day' as const }
   }
   
   // year: 12 mois de janvier à décembre
-  const fromDate = new Date(y, 0, 1)
-  const toDate = new Date(y, 11, 31)
-  const from = fromDate.toISOString().slice(0,10)
-  const to = toDate.toISOString().slice(0,10)
+  const from = `${y}-01-01`
+  const to = `${y}-12-31`
   return { from, to, group: 'month' as const }
 }

@@ -32,6 +32,7 @@ export default function InvoiceEditPage() {
   const [searchTimeout, setSearchTimeout] = useState<NodeJS.Timeout | null>(null)
   const [dropdownSearchTerm, setDropdownSearchTerm] = useState('')
   const [supplierCode, setSupplierCode] = useState('')
+  const [supplierValidationStatus, setSupplierValidationStatus] = useState<string | null>(null)
 
   // Fonction pour uniformiser le texte (Title Case)
   const formatText = (text: string) => {
@@ -150,6 +151,7 @@ export default function InvoiceEditPage() {
         if (data.invoice?.supplier_id && data.invoice?.supplier) {
           setSupplierCode(data.invoice.supplier.code || '')
           setSelectedSupplier(data.invoice.supplier)
+          setSupplierValidationStatus(data.invoice.supplier.validation_status || null)
         }
         setDescription(data.invoice?.extracted_data?.description || '')
         setInvoiceTotal(Number(data.invoice?.extracted_data?.total_amount || 0))
@@ -473,6 +475,47 @@ export default function InvoiceEditPage() {
 
         {error && (
           <div className="mb-4 p-3 rounded bg-red-50 text-red-700 text-sm">{error}</div>
+        )}
+
+        {/* Banner d'alerte si le fournisseur est en attente de validation */}
+        {supplierValidationStatus === 'pending' && (
+          <div className="mb-6 bg-gradient-to-r from-yellow-50 to-orange-50 border-l-4 border-yellow-500 rounded-lg shadow-md p-5">
+            <div className="flex items-start gap-4">
+              <div className="bg-yellow-500 rounded-full p-2 flex-shrink-0">
+                <svg className="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                </svg>
+              </div>
+              <div className="flex-1">
+                <h3 className="text-lg font-bold text-gray-900 mb-2">
+                  ⏳ Fournisseur en attente de validation
+                </h3>
+                <p className="text-gray-700 mb-3">
+                  Le fournisseur <strong className="text-yellow-800">{selectedSupplier?.display_name || supplierName}</strong> a été détecté automatiquement lors de l'import et est en attente de validation.
+                </p>
+                <div className="flex gap-3">
+                  <Button 
+                    size="sm"
+                    className="bg-blue-600 hover:bg-blue-700 text-white font-semibold"
+                    onClick={() => router.push('/suppliers')}
+                  >
+                    <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                    Aller valider le fournisseur
+                  </Button>
+                  <Button 
+                    size="sm"
+                    variant="outline"
+                    className="border-gray-300 text-gray-700 hover:bg-gray-100"
+                    onClick={() => window.open('/suppliers', '_blank')}
+                  >
+                    Ouvrir dans un nouvel onglet
+                  </Button>
+                </div>
+              </div>
+            </div>
+          </div>
         )}
 
         <div className="flex gap-0 relative min-w-0">
