@@ -520,7 +520,7 @@ export default function InvoiceEditPage() {
 
         <div className="flex gap-0 relative min-w-0">
           <div className="space-y-4 min-w-0" style={{ width: showPreview ? `${100 - previewWidth}%` : '100%', transition: isResizing ? 'none' : 'width 0.3s', paddingRight: showPreview ? '12px' : '0' }}>
-            <div className="bg-white shadow rounded p-4">
+            <div className={`shadow rounded p-4 ${supplierValidationStatus === 'pending' ? 'bg-gradient-to-r from-yellow-50 to-orange-50 border-l-4 border-yellow-500' : 'bg-white'}`}>
               <div className="flex items-center justify-between mb-3">
                 <h2 className="text-sm font-semibold text-gray-900">Propriétés</h2>
                 <Button size="sm" variant="outline" onClick={async () => {
