@@ -35,6 +35,11 @@ export default function SuppliersPage() {
   const [loading, setLoading] = useState(true)
   const [searchTerm, setSearchTerm] = useState('')
   const [validationFilter, setValidationFilter] = useState<'all' | 'pending' | 'validated' | 'rejected'>('all')
+  const [validationModal, setValidationModal] = useState<{ isOpen: boolean; supplier: Supplier | null; supplierInfo: any }>({ 
+    isOpen: false, 
+    supplier: null,
+    supplierInfo: null
+  })
 
   useEffect(() => {
     const checkAuth = async () => {
@@ -58,6 +63,47 @@ export default function SuppliersPage() {
       fetchSuppliers()
     }
   }, [user])
+
+  const openValidationModal = async (supplier: Supplier) => {
+    try {
+      // Récupérer les informations extraites de la première facture de ce fournisseur
+      const supabase = createClient()
+      const { data: invoices } = await (supabase as any)
+        .from('invoices')
+        .select('extracted_data')
+        .eq('supplier_id', supplier.id)
+        .limit(1)
+        .single()
+      
+      const extractedData = invoices?.extracted_data || {}
+      
+      setValidationModal({
+        isOpen: true,
+        supplier,
+        supplierInfo: {
+          address: extractedData.supplier_address || supplier.address || '',
+          email: extractedData.supplier_email || supplier.email || '',
+          phone: extractedData.supplier_phone || supplier.phone || '',
+          vat_number: extractedData.supplier_vat_number || supplier.vat_number || '',
+          siret: supplier.siret || ''
+        }
+      })
+    } catch (error) {
+      console.error('❌ [SUPPLIERS] Erreur lors du chargement des infos:', error)
+      // Ouvrir quand même le modal avec les données du supplier
+      setValidationModal({
+        isOpen: true,
+        supplier,
+        supplierInfo: {
+          address: supplier.address || '',
+          email: supplier.email || '',
+          phone: supplier.phone || '',
+          vat_number: supplier.vat_number || '',
+          siret: supplier.siret || ''
+        }
+      })
+    }
+  }
 
   const updateValidationStatus = async (supplierId: string, newStatus: 'validated' | 'rejected') => {
     try {
@@ -418,7 +464,7 @@ export default function SuppliersPage() {
                           <Button 
                             size="sm"
                             className="bg-gradient-to-r from-green-600 to-green-700 hover:from-green-700 hover:to-green-800 text-white shadow-md hover:shadow-lg transition-all font-semibold"
-                            onClick={() => updateValidationStatus(supplier.id, 'validated')}
+                            onClick={() => openValidationModal(supplier)}
                           >
                             <svg className="w-4 h-4 mr-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
@@ -644,6 +690,188 @@ export default function SuppliersPage() {
           </div>
         )}
       </div>
+
+      {/* Modal de validation */}
+      {validationModal.isOpen && validationModal.supplier && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+            {/* Header */}
+            <div className="bg-gradient-to-r from-blue-600 to-indigo-700 px-6 py-5 rounded-t-xl">
+              <div className="flex items-center justify-between">
+                <h2 className="text-2xl font-bold text-white flex items-center gap-3">
+                  <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                  Validation du fournisseur
+                </h2>
+                <button 
+                  onClick={() => setValidationModal({ isOpen: false, supplier: null, supplierInfo: null })}
+                  className="text-white hover:text-gray-200 transition-colors"
+                >
+                  <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
+            </div>
+
+            {/* Body */}
+            <div className="p-6 space-y-6">
+              {/* Nom du fournisseur */}
+              <div className="bg-gradient-to-r from-blue-50 to-indigo-50 border-2 border-blue-200 rounded-lg p-4">
+                <label className="block text-sm font-semibold text-gray-700 mb-2">Nom du fournisseur</label>
+                <div className="text-2xl font-bold text-gray-900">{validationModal.supplier.display_name}</div>
+                <div className="text-sm text-gray-600 mt-1">Code: {validationModal.supplier.code}</div>
+              </div>
+
+              {/* Informations extraites */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {/* Adresse */}
+                {validationModal.supplierInfo?.address && (
+                  <div className="col-span-2">
+                    <label className="block text-sm font-semibold text-gray-700 mb-2 flex items-center gap-2">
+                      <svg className="w-4 h-4 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
+                      </svg>
+                      Adresse
+                    </label>
+                    <Input 
+                      type="text" 
+                      value={validationModal.supplierInfo.address}
+                      className="bg-gray-50"
+                      disabled
+                    />
+                  </div>
+                )}
+
+                {/* Email */}
+                {validationModal.supplierInfo?.email && (
+                  <div>
+                    <label className="block text-sm font-semibold text-gray-700 mb-2 flex items-center gap-2">
+                      <svg className="w-4 h-4 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+                      </svg>
+                      Email
+                    </label>
+                    <Input 
+                      type="email" 
+                      value={validationModal.supplierInfo.email}
+                      className="bg-gray-50"
+                      disabled
+                    />
+                  </div>
+                )}
+
+                {/* Téléphone */}
+                {validationModal.supplierInfo?.phone && (
+                  <div>
+                    <label className="block text-sm font-semibold text-gray-700 mb-2 flex items-center gap-2">
+                      <svg className="w-4 h-4 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z" />
+                      </svg>
+                      Téléphone
+                    </label>
+                    <Input 
+                      type="tel" 
+                      value={validationModal.supplierInfo.phone}
+                      className="bg-gray-50"
+                      disabled
+                    />
+                  </div>
+                )}
+
+                {/* N° TVA */}
+                {validationModal.supplierInfo?.vat_number && (
+                  <div>
+                    <label className="block text-sm font-semibold text-gray-700 mb-2 flex items-center gap-2">
+                      <svg className="w-4 h-4 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                      </svg>
+                      N° TVA / SIRET
+                    </label>
+                    <Input 
+                      type="text" 
+                      value={validationModal.supplierInfo.vat_number}
+                      className="bg-gray-50"
+                      disabled
+                    />
+                  </div>
+                )}
+
+                {/* SIRET */}
+                {validationModal.supplierInfo?.siret && (
+                  <div>
+                    <label className="block text-sm font-semibold text-gray-700 mb-2 flex items-center gap-2">
+                      <svg className="w-4 h-4 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                      </svg>
+                      SIRET
+                    </label>
+                    <Input 
+                      type="text" 
+                      value={validationModal.supplierInfo.siret}
+                      className="bg-gray-50"
+                      disabled
+                    />
+                  </div>
+                )}
+              </div>
+
+              {/* Message d'information */}
+              <div className="bg-yellow-50 border-l-4 border-yellow-400 p-4 rounded">
+                <div className="flex items-start gap-3">
+                  <svg className="w-5 h-5 text-yellow-600 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                  <div className="text-sm text-yellow-800">
+                    <p className="font-semibold mb-1">Ces informations ont été extraites automatiquement</p>
+                    <p>Vérifiez leur exactitude avant de valider le fournisseur. Vous pourrez les modifier ultérieurement dans la fiche fournisseur.</p>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Footer */}
+            <div className="bg-gray-50 px-6 py-4 rounded-b-xl flex justify-end gap-3 border-t">
+              <Button
+                variant="outline"
+                onClick={() => setValidationModal({ isOpen: false, supplier: null, supplierInfo: null })}
+              >
+                Annuler
+              </Button>
+              <Button
+                className="bg-gradient-to-r from-red-500 to-red-600 hover:from-red-600 hover:to-red-700 text-white shadow-md hover:shadow-lg transition-all"
+                onClick={() => {
+                  if (validationModal.supplier) {
+                    updateValidationStatus(validationModal.supplier.id, 'rejected')
+                    setValidationModal({ isOpen: false, supplier: null, supplierInfo: null })
+                  }
+                }}
+              >
+                <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+                Rejeter
+              </Button>
+              <Button
+                className="bg-gradient-to-r from-green-600 to-green-700 hover:from-green-700 hover:to-green-800 text-white shadow-md hover:shadow-lg transition-all"
+                onClick={() => {
+                  if (validationModal.supplier) {
+                    updateValidationStatus(validationModal.supplier.id, 'validated')
+                    setValidationModal({ isOpen: false, supplier: null, supplierInfo: null })
+                  }
+                }}
+              >
+                <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                </svg>
+                Valider le fournisseur
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

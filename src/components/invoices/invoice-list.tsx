@@ -378,8 +378,15 @@ export function InvoiceList({ from, to }: { from?: string; to?: string }) {
                 const supplierDisplay = truncate(formatTitleCaseName(String(inv?.supplier?.display_name || ed.supplier_name || '')), 30)
                 const invoiceNumberDisplay = truncate(String(ed.invoice_number || ''), 20)
                 const rowIndex = (page - 1) * pageSize + idx + 1
+                
+                // Vérifier si le fournisseur est en attente de validation
+                const isSupplierPending = inv?.supplier?.validation_status === 'pending'
+                const rowClassName = isSupplierPending 
+                  ? "border-t bg-gradient-to-r from-yellow-50 to-orange-50 hover:from-yellow-100 hover:to-orange-100 cursor-pointer border-l-4 border-l-yellow-500"
+                  : "border-t odd:bg-gray-50 hover:bg-blue-50/40 cursor-pointer"
+                
                 return (
-                  <tr key={inv.id} className="border-t odd:bg-gray-50 hover:bg-blue-50/40 cursor-pointer" onClick={(e) => {
+                  <tr key={inv.id} className={rowClassName} onClick={(e) => {
                     const tag = (e.target as HTMLElement).tagName
                     if (['INPUT', 'BUTTON', 'A', 'SVG', 'PATH'].includes(tag)) return
                     router.push(`/invoices/${inv.id}`)
@@ -395,9 +402,16 @@ export function InvoiceList({ from, to }: { from?: string; to?: string }) {
                       </div>
                     </td>
                     <td className="px-2 py-1 w-[260px]">
-                      <span className="truncate block max-w-[220px]" title={ed.supplier_name || ''}>
-                        {supplierDisplay}
-                      </span>
+                      <div className="flex items-center gap-2">
+                        <span className="truncate block max-w-[180px]" title={ed.supplier_name || ''}>
+                          {supplierDisplay}
+                        </span>
+                        {isSupplierPending && (
+                          <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800 border border-yellow-300">
+                            ⏳ En attente
+                          </span>
+                        )}
+                      </div>
                     </td>
                     <td className="px-2 py-1">{formatShortDate(ed.invoice_date)}</td>
                     <td className="px-2 py-1 text-right">{ed.subtotal ? formatCurrency(ed.subtotal) : '—'}</td>
