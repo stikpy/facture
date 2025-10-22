@@ -161,6 +161,20 @@ export async function GET(request: NextRequest) {
         }
       }
       
+      // Fallback: si supplier_name est vide, tenter de le déduire du nom de fichier
+      if (!(extractedData as any)?.supplier_name) {
+        try {
+          const fn = String((invoice as any).file_name || '')
+          // Prendre la partie avant le premier '-' ou '_' puis nettoyer
+          const raw = fn.split(/[\-_]/)[0] || ''
+          const candidate = raw.replace(/\.[a-z0-9]+$/i, '').trim()
+          if (candidate && candidate.length >= 3) {
+            (extractedData as any).supplier_name = candidate
+            console.log(`🔧 [WORKER] supplier_name déduit du nom du fichier: "${candidate}"`)
+          }
+        } catch {}
+      }
+
       let classification = await documentProcessor.classifyInvoice(extractedData)
       
       // Vérifier si l'extraction a échoué (tous les champs importants sont null)

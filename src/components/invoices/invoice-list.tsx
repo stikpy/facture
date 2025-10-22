@@ -381,6 +381,7 @@ export function InvoiceList({ from, to }: { from?: string; to?: string }) {
                 
                 // Vérifier si le fournisseur est en attente de validation
                 const isSupplierPending = inv?.supplier?.validation_status === 'pending'
+                  || (!inv?.supplier_id && !!ed?.supplier_name) // pas encore lié, mais un nom a été extrait
                 const rowClassName = isSupplierPending 
                   ? "border-t bg-gradient-to-r from-yellow-50 to-orange-50 hover:from-yellow-100 hover:to-orange-100 cursor-pointer border-l-4 border-l-yellow-500"
                   : "border-t odd:bg-gray-50 hover:bg-blue-50/40 cursor-pointer"
