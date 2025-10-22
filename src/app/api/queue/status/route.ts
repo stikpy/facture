@@ -49,6 +49,17 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ status: 'pending', hasTask: false }, { status: 200 })
     }
 
+    // Si la tâche est en pending depuis plus de 5 secondes, relancer un worker
+    if ((task as any).status === 'pending') {
+      const created = new Date((task as any).created_at).getTime()
+      if (Date.now() - created > 5000) {
+        try {
+          const origin = request.nextUrl.origin
+          await fetch(`${origin}/api/queue/worker`).catch(() => {})
+        } catch {}
+      }
+    }
+
     return NextResponse.json({
       taskId: (task as any).id,
       status: (task as any).status,
