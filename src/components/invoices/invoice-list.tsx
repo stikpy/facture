@@ -55,13 +55,26 @@ export function InvoiceList({ from, to }: { from?: string; to?: string }) {
         query = query.eq('status', filter)
       }
 
-      // On récupère d'abord la liste, puis on filtre côté client (pour couvrir le JSON extrait)
-      if (from) query = query.gte('created_at', from)
-      if (to) query = query.lte('created_at', to)
-
       let { data, error } = await query
 
       if (error) throw error
+
+      // Filtrage par date de document (extracted_data.invoice_date) pour cohérence avec le dashboard
+      if (from || to) {
+        data = (data || []).filter((inv: any) => {
+          const ed = inv.extracted_data || {}
+          const invoiceDateStr = ed.invoice_date || inv.created_at
+          if (!invoiceDateStr) return true
+          const invoiceDate = new Date(invoiceDateStr)
+          if (from && invoiceDate < new Date(from)) return false
+          if (to) {
+            const toDate = new Date(to)
+            toDate.setHours(23, 59, 59, 999)
+            if (invoiceDate > toDate) return false
+          }
+          return true
+        })
+      }
 
       // Filtre complémentaire côté client (recherche texte + montants)
       if (searchTerm.trim()) {
