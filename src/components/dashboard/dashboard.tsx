@@ -17,7 +17,7 @@ export function Dashboard() {
   const search = useSearchParams()
   const [activeTab, setActiveTab] = useState<'invoices'>('invoices')
   const now = useMemo(() => new Date(), [])
-  const [range, setRange] = useState<'month' | '12m' | 'year'>((search.get('range') as any) || 'month')
+  const [range, setRange] = useState<'month' | 'year'>((search.get('range') as any) || 'month')
   const [supplier, setSupplier] = useState<string>(search.get('supplier') || '')
   const [status, setStatus] = useState<'completed' | 'processing' | 'error' | ''>((search.get('status') as any) || '')
   const [year, setYear] = useState<number>(Number(search.get('year')) || now.getFullYear())
@@ -34,8 +34,8 @@ export function Dashboard() {
     params.set('range', range)
     if (supplier) params.set('supplier', supplier)
     if (status) params.set('status', status)
-    if (range === 'year' || range === 'month' || range === '12m') params.set('year', String(year))
-    if (range === 'month' || range === '12m') params.set('month', String(month))
+    if (range === 'year' || range === 'month') params.set('year', String(year))
+    if (range === 'month') params.set('month', String(month))
     const qs = params.toString()
     router.replace(`/` + (qs ? `?${qs}` : ''), { scroll: false })
   }, [range, supplier, status, year, month])
@@ -107,7 +107,7 @@ export function Dashboard() {
               <option value="processing">En cours</option>
               <option value="error">Erreurs</option>
             </select>
-            {(range === 'month' || range === '12m' || range === 'year') && (
+            {(range === 'month' || range === 'year') && (
               <select value={year} onChange={(e)=>setYear(Number(e.target.value))} className="border border-gray-300 rounded px-2 py-1.5 text-sm">
                 {Array.from({ length: 6 }).map((_,i)=>{
                   const y = now.getFullYear() - i
@@ -115,7 +115,7 @@ export function Dashboard() {
                 })}
               </select>
             )}
-            {(range === 'month' || range === '12m') && (
+            {range === 'month' && (
               <select value={month} onChange={(e)=>setMonth(Number(e.target.value))} className="border border-gray-300 rounded px-2 py-1.5 text-sm">
                 {Array.from({ length: 12 }).map((_,i)=>{
                   const m = i + 1
@@ -126,7 +126,6 @@ export function Dashboard() {
           </div>
           <div className="flex items-center gap-2">
           <button onClick={() => setRange('month')} className={`px-3 py-1.5 text-sm rounded border ${range==='month'?'bg-blue-50 border-blue-200 text-blue-700':'border-gray-200 text-gray-700 hover:bg-gray-50'}`}>Mois courant</button>
-          <button onClick={() => setRange('12m')} className={`px-3 py-1.5 text-sm rounded border ${range==='12m'?'bg-blue-50 border-blue-200 text-blue-700':'border-gray-200 text-gray-700 hover:bg-gray-50'}`}>12 mois</button>
           <button onClick={() => setRange('year')} className={`px-3 py-1.5 text-sm rounded border ${range==='year'?'bg-blue-50 border-blue-200 text-blue-700':'border-gray-200 text-gray-700 hover:bg-gray-50'}`}>Année</button>
           </div>
         </div>
@@ -142,23 +141,23 @@ export function Dashboard() {
   )
 }
 
-function computeFilters(range: 'month' | '12m' | 'year', year?: number, month?: number) {
+function computeFilters(range: 'month' | 'year', year?: number, month?: number) {
   const now = new Date()
   const y = year || now.getFullYear()
   const m = month ? month - 1 : now.getMonth()
-  const to = new Date(y, m + (range==='12m'?12:1), 0).toISOString().slice(0,10)
+  
   if (range === 'month') {
     const fromDate = new Date(y, m, 1)
+    const toDate = new Date(y, m + 1, 0)
     const from = fromDate.toISOString().slice(0,10)
+    const to = toDate.toISOString().slice(0,10)
     return { from, to, group: 'day' as const }
   }
-  if (range === '12m') {
-    const fromDate = new Date(y, m - 11, 1)
-    const from = fromDate.toISOString().slice(0,10)
-    return { from, to, group: 'month' as const }
-  }
-  // year
+  
+  // year: 12 mois de janvier à décembre
   const fromDate = new Date(y, 0, 1)
+  const toDate = new Date(y, 11, 31)
   const from = fromDate.toISOString().slice(0,10)
+  const to = toDate.toISOString().slice(0,10)
   return { from, to, group: 'month' as const }
 }
