@@ -3,6 +3,7 @@ import { supabaseAdmin } from '@/lib/supabase'
 import { StorageService } from '@/lib/storage'
 import { DocumentProcessor } from '@/lib/ai/document-processor'
 import { OCRProcessor } from '@/lib/ai/ocr-processor'
+import { upsertSupplier } from '@/lib/suppliers'
 
 export const maxDuration = 300 // 5 minutes max pour Vercel
 export const runtime = 'nodejs'
@@ -135,6 +136,31 @@ export async function GET(request: NextRequest) {
       console.log('🤖 [WORKER] Traitement IA')
       const documentProcessor = new DocumentProcessor()
       let extractedData = await documentProcessor.processDocument(extractedText, (invoice as any).file_name)
+      
+      // POST-VALIDATION: Vérifier que fournisseur ≠ client
+      if ((extractedData as any)?.supplier_name && (extractedData as any)?.client_name) {
+        const supplierNorm = String((extractedData as any).supplier_name).toLowerCase().trim()
+        const clientNorm = String((extractedData as any).client_name).toLowerCase().trim()
+        
+        if (supplierNorm === clientNorm) {
+          console.warn('⚠️ [WORKER] ERREUR DÉTECTÉE: supplier_name = client_name!')
+          console.warn(`⚠️ [WORKER] Valeur incorrecte: "${(extractedData as any).supplier_name}"`)
+          console.warn('⚠️ [WORKER] Tentative de correction automatique...')
+          
+          // Essayer d'extraire le nom du fournisseur depuis le nom du fichier
+          const fileNameMatch = (invoice as any).file_name.match(/^([^-]+)/)
+          if (fileNameMatch && fileNameMatch[1]) {
+            const supplierFromFileName = fileNameMatch[1].trim()
+            console.log(`🔧 [WORKER] Extraction du fournisseur depuis le nom du fichier: "${supplierFromFileName}"`)
+            ;(extractedData as any).supplier_name = supplierFromFileName
+            console.log(`✅ [WORKER] Correction appliquée: supplier_name = "${supplierFromFileName}"`)
+          } else {
+            console.error('❌ [WORKER] Impossible de corriger automatiquement, fournisseur invalide')
+            ;(extractedData as any).supplier_name = 'FOURNISSEUR INCONNU - À VÉRIFIER'
+          }
+        }
+      }
+      
       let classification = await documentProcessor.classifyInvoice(extractedData)
       
       // Vérifier si l'extraction a échoué (tous les champs importants sont null)
@@ -191,16 +217,41 @@ export async function GET(request: NextRequest) {
       console.log(JSON.stringify(extractedData, null, 2))
       console.log('[WORKER] ==============================')
 
+      // Upsert supplier avec organization_id de la facture
+      let supplierId: string | null = null
+      try {
+        const supplierName = (extractedData as any)?.supplier_name
+        if (supplierName && (invoice as any).organization_id) {
+          console.log(`🏢 [WORKER] Création/Recherche du fournisseur "${supplierName}" pour l'organisation ${(invoice as any).organization_id}`)
+          const supplier = await upsertSupplier(String(supplierName), (invoice as any).organization_id)
+          if (supplier) {
+            supplierId = supplier.id
+            console.log(`✅ [WORKER] Fournisseur associé: ${supplier.display_name} (${supplier.code}, validation_status: ${supplier.validation_status})`)
+          }
+        } else {
+          console.warn('⚠️ [WORKER] Impossible de créer le fournisseur: supplierName ou organization_id manquant')
+        }
+      } catch (e) { 
+        console.error('❌ [WORKER] Erreur lors de l\'upsert du fournisseur:', e)
+      }
+
       // Sauvegarder les résultats
       console.log('💾 [WORKER] Sauvegarde des résultats')
       {
+        const updateData: any = {
+          extracted_data: extractedData,
+          classification: classification.category,
+          status: 'completed'
+        }
+        
+        // Ajouter le supplier_id si créé
+        if (supplierId) {
+          updateData.supplier_id = supplierId
+        }
+        
         const { error } = await (supabaseAdmin as any)
           .from('invoices')
-          .update({
-            extracted_data: extractedData,
-            classification: classification.category,
-            status: 'completed'
-          } as any)
+          .update(updateData)
           .eq('id', (task as any).invoice_id)
         if (error) {
           // Gère les doublons de numéro de facture (contrainte unique côté BDD)
