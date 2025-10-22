@@ -65,11 +65,27 @@ export class OCRProcessor {
       // et les traiter avec l'OCR
       const text = String(data?.text || '').trim()
       console.log('[OCR] pdf-parse texte (taille):', text.length)
+      const numPages = Number((data as any)?.numpages || 0)
+      console.log('[OCR] pdf-parse pages:', numPages)
       
-      // Si pdf-parse renvoie du contenu, l'utiliser directement
-      if (text && text.length > 30) {
-        return [text]
+      // Si le PDF a plusieurs pages, préférer une extraction page-par-page
+      if (numPages > 1) {
+        console.log('[OCR] Document multi-pages, tentative page-par-page…')
+        const ocrResult = await this.ocrPdfPages(pdfBuffer)
+        this.lastAlternatives = ocrResult.alternativeRotations || []
+        if (ocrResult.texts.length > 0) {
+          const concatLen = ocrResult.texts.join('\n').length
+          // Si l'extraction page-par-page est plus riche que le texte global, retourner les pages
+          if (concatLen >= text.length * 0.8) {
+            return ocrResult.texts
+          }
+        }
+        // fallback au texte global si page-par-page trop pauvre
+        if (text && text.length > 30) return [text]
       }
+      
+      // Si pdf-parse renvoie du contenu (même mono-page), l'utiliser directement
+      if (text && text.length > 30) return [text]
       
       // Sinon, tenter l'OCR sur le PDF scanné
       console.log('[OCR] pdf-parse vide, tentative OCR fallback...')
@@ -114,7 +130,8 @@ export class OCRProcessor {
         outputFolder: undefined, // En mémoire
         strictPagesToProcess: false,
         verbosityLevel: 0,
-        pagesToProcess: [1, 2] // Première et deuxième page max
+        // Ne pas restreindre: traiter toutes les pages (un cap sera appliqué ci-dessous)
+        pagesToProcess: undefined
       })
       
       console.log(`[OCR] ${pngPages.length} pages PNG générées`)
@@ -129,7 +146,8 @@ export class OCRProcessor {
       const pageTexts: string[] = []
       const allRotationResults: Array<{rotation: number, score: number, text: string}> = []
       
-      for (let i = 0; i < Math.min(pngPages.length, 2); i++) {
+      const maxPages = Math.min(pngPages.length, 12) // Cap de sécurité
+      for (let i = 0; i < maxPages; i++) {
         const page = pngPages[i]
         console.log(`[OCR] Traitement page ${i + 1}, taille: ${page.content?.length || 0} bytes`)
         
