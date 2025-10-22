@@ -188,21 +188,21 @@ export async function GET(request: NextRequest) {
             await (supabaseAdmin as any)
               .from('invoices')
               .update({
-                status: 'error',
+                status: 'duplicate',
                 extracted_data: {
                   ...(extractedData as any),
                   duplicate: true,
-                  error: 'Doublon: ce numéro de facture existe déjà pour cet utilisateur'
+                  note: 'Déjà importée — doublon de numéro'
                 }
               } as any)
               .eq('id', (task as any).invoice_id)
 
             await (supabaseAdmin as any)
               .from('processing_queue')
-              .update({ status: 'failed', error_message: 'duplicate_invoice_number' } as any)
+              .update({ status: 'completed', error_message: 'duplicate_invoice_number' } as any)
               .eq('id', (task as any).id)
 
-            return NextResponse.json({ success: false, duplicate: true })
+            return NextResponse.json({ success: true, duplicate: true })
           }
           throw new Error(`DB update invoices->completed: ${error.message}`)
         }
