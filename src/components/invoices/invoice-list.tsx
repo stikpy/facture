@@ -9,7 +9,7 @@ import { FileText, Download, Eye, Trash2, CheckCircle2, Clock3, TriangleAlert } 
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 
-export function InvoiceList() {
+export function InvoiceList({ from, to }: { from?: string; to?: string }) {
   const [invoices, setInvoices] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
   const [filter, setFilter] = useState<'all' | 'completed' | 'processing' | 'error'>('all')
@@ -38,7 +38,7 @@ export function InvoiceList() {
 
   useEffect(() => {
     fetchInvoices()
-  }, [filter, searchTerm])
+  }, [filter, searchTerm, from, to])
 
   const fetchInvoices = async () => {
     try {
@@ -56,6 +56,9 @@ export function InvoiceList() {
       }
 
       // On récupère d'abord la liste, puis on filtre côté client (pour couvrir le JSON extrait)
+      if (from) query = query.gte('created_at', from)
+      if (to) query = query.lte('created_at', to)
+
       let { data, error } = await query
 
       if (error) throw error

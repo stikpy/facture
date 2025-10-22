@@ -460,8 +460,8 @@ export default function InvoiceEditPage() {
 
   return (
     <div className="min-h-screen bg-gray-50 py-8">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="flex items-center justify-between mb-6">
+      <div className="mx-auto px-4 sm:px-6 lg:px-8">
+        <div className="flex items-center justify-between mb-6 min-w-0">
           <h1 className="text-2xl font-semibold text-gray-900">Édition facture</h1>
           <div className="flex items-center space-x-2">
             {!showPreview && (
@@ -475,8 +475,8 @@ export default function InvoiceEditPage() {
           <div className="mb-4 p-3 rounded bg-red-50 text-red-700 text-sm">{error}</div>
         )}
 
-        <div className="flex gap-0 relative">
-          <div className="space-y-4" style={{ width: showPreview ? `${100 - previewWidth}%` : '100%', transition: isResizing ? 'none' : 'width 0.3s', paddingRight: showPreview ? '12px' : '0' }}>
+        <div className="flex gap-0 relative min-w-0">
+          <div className="space-y-4 min-w-0" style={{ width: showPreview ? `${100 - previewWidth}%` : '100%', transition: isResizing ? 'none' : 'width 0.3s', paddingRight: showPreview ? '12px' : '0' }}>
             <div className="bg-white shadow rounded p-4">
               <div className="flex items-center justify-between mb-3">
                 <h2 className="text-sm font-semibold text-gray-900">Propriétés</h2>
@@ -717,13 +717,13 @@ export default function InvoiceEditPage() {
 
               <div className="space-y-3">
                 {allocations.map((row, idx) => (
-                  <div key={idx} className="border rounded-lg p-3 bg-gray-50 hover:bg-gray-100 transition-colors">
-                    <div className="grid grid-cols-12 gap-3 items-start">
+                  <div key={idx} className="border border-gray-200 rounded-lg p-3 bg-white shadow-sm">
+                    <div className="grid grid-cols-12 gap-4 items-end">
                       {/* Compte */}
                       <div className="col-span-3">
                         <label className="block text-xs font-medium text-gray-700 mb-1">Compte comptable</label>
                         <select
-                          className="w-full border border-gray-300 rounded-md px-3 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white shadow-sm hover:border-gray-400 transition-colors"
+                          className="w-full h-9 border border-gray-300 rounded-md px-3 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white hover:border-gray-400 transition-colors"
                           value={row.account_code}
                           title={(() => {
                             const a = HOTEL_RESTAURANT_ACCOUNTS.find(p => p.code === (row.account_code || ''))
@@ -763,13 +763,13 @@ export default function InvoiceEditPage() {
                       </div>
 
                       {/* Libellé */}
-                      <div className="col-span-3">
+                      <div className="col-span-2">
                         <label className="block text-xs font-medium text-gray-700 mb-1">Libellé</label>
                         <Input 
                           value={row.label} 
                           onChange={(e: React.ChangeEvent<HTMLInputElement>) => updateRow(idx, { label: e.target.value })} 
-                          placeholder="Description de la ligne"
-                          className="border-gray-300 shadow-sm hover:border-gray-400 transition-colors"
+                          placeholder="Libellé de la ligne"
+                          className="h-9 border-gray-300 hover:border-gray-400 transition-colors"
                         />
                       </div>
 
@@ -777,7 +777,7 @@ export default function InvoiceEditPage() {
                       <div className="col-span-2">
                         <label className="block text-xs font-medium text-gray-700 mb-1">Code TVA</label>
                         <select
-                          className="w-full border border-gray-300 rounded-md px-3 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white shadow-sm hover:border-gray-400 transition-colors"
+                          className="w-full h-9 border border-gray-300 rounded-md px-3 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white hover:border-gray-400 transition-colors"
                           value={row.vat_code || ''}
                           title={(() => {
                             const v = VAT_PRESETS.find(p => p.code === (row.vat_code || ''))
@@ -804,35 +804,37 @@ export default function InvoiceEditPage() {
 
                       {/* Montant HT */}
                       <div className="col-span-2">
-                        <label className="block text-xs font-medium text-gray-700 mb-1">Montant HT (€)</label>
-                        <Input 
-                          type="number" 
-                          step="0.01" 
-                          value={row.amount} 
-                          onChange={(e: React.ChangeEvent<HTMLInputElement>) => updateRow(idx, { amount: Number(e.target.value) })}
-                          className="text-right border-gray-300 shadow-sm hover:border-gray-400 transition-colors font-medium"
-                          placeholder="0.00"
-                        />
+                        <label className="block text-xs font-medium text-gray-700 mb-1">Montant HT</label>
+                        <div className="relative">
+                          <Input 
+                            type="number" 
+                            step="0.01" 
+                            value={row.amount} 
+                            onChange={(e: React.ChangeEvent<HTMLInputElement>) => updateRow(idx, { amount: Number(e.target.value) })}
+                            className="h-9 pr-8 text-right border-gray-300 hover:border-gray-400 transition-colors font-medium"
+                            placeholder="0.00"
+                          />
+                          <span className="absolute inset-y-0 right-2 flex items-center text-gray-400 text-xs">€</span>
+                        </div>
                       </div>
 
                       {/* Montant TTC (calculé) */}
-                      <div className="col-span-1">
+                      <div className="col-span-2">
                         <label className="block text-xs font-medium text-gray-700 mb-1">TTC (€)</label>
-                        <div className="px-3 py-2.5 bg-blue-50 border border-blue-200 rounded-md text-sm text-right font-semibold text-blue-900">
-                          {totalForRow(row).toFixed(2)}
+                        <div className="px-3 bg-blue-50 border border-blue-200 rounded-md text-sm font-semibold text-blue-900 h-9 flex items-center justify-end whitespace-nowrap min-w-[96px]">
+                          <span className="tabular-nums">{totalForRow(row).toFixed(2)}</span>
                         </div>
                       </div>
 
                       {/* Bouton supprimer */}
                       <div className="col-span-1 flex items-end">
-                        <Button 
-                          variant="ghost" 
-                          size="sm" 
+                        <button
+                          type="button"
                           onClick={() => removeRow(idx)}
-                          className="text-red-600 hover:text-red-700 hover:bg-red-50 w-full"
+                          className="h-9 w-9 rounded-md text-red-600 hover:text-red-700 hover:bg-red-50 flex items-center justify-center transition-colors"
                         >
                           ✕
-                        </Button>
+                        </button>
                       </div>
                     </div>
 

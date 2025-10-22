@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import { createClient } from '@/utils/supabase/client'
-import { FileText, CheckCircle, Clock, AlertCircle } from 'lucide-react'
+import { FileText, CheckCircle, Clock, AlertCircle, TrendingUp, Users } from 'lucide-react'
 
 interface Stats {
   total: number
@@ -11,10 +11,12 @@ interface Stats {
   error: number
 }
 
-export function StatsCards() {
+type Filters = { from?: string; to?: string; group?: 'day' | 'month'; supplier?: string; status?: 'completed' | 'processing' | 'error' }
+
+export function StatsCards({ filters }: { filters?: Filters }) {
   const [stats, setStats] = useState<Stats>({ total: 0, completed: 0, processing: 0, error: 0 })
   const [loading, setLoading] = useState(true)
-  const [summary, setSummary] = useState<{ monthTotal?: number; topSupplier?: string }>({})
+  const [summary, setSummary] = useState<{ monthTotal?: number; topSupplier?: string; categoryTop?: string }>({})
 
   useEffect(() => {
     const supabase = createClient()
@@ -41,12 +43,19 @@ export function StatsCards() {
 
         // Résumé via API stats
         try {
-          const res = await fetch('/api/stats')
+          const qs = new URLSearchParams()
+          if (filters?.group) qs.set('group', filters.group)
+          if (filters?.from) qs.set('from', filters.from)
+          if (filters?.to) qs.set('to', filters.to)
+          if (filters?.supplier) qs.set('supplier', filters.supplier)
+          if (filters?.status) qs.set('status', filters.status)
+          const res = await fetch(`/api/stats?${qs.toString()}`)
           if (res.ok) {
             const json = await res.json()
-            const lastMonth = (json.byMonth || []).slice(-1)[0]
+            const lastPeriod = (json.byGroup || []).slice(-1)[0]
             const top = (json.bySupplier || [])[0]
-            setSummary({ monthTotal: lastMonth?.total, topSupplier: top?.supplier })
+            const topCat = (json.byCategory || [])[0]
+            setSummary({ monthTotal: lastPeriod?.total, topSupplier: top?.supplier, categoryTop: topCat?.category })
           }
         } catch {}
       } catch (error) {
@@ -57,7 +66,7 @@ export function StatsCards() {
     }
 
     fetchStats()
-  }, [])
+  }, [filters])
 
   if (loading) {
     return (
@@ -79,7 +88,7 @@ export function StatsCards() {
       icon: FileText,
       color: 'text-blue-600',
       bgColor: 'bg-blue-50',
-      extra: summary.monthTotal !== undefined ? `Mois en cours: ${summary.monthTotal?.toFixed(2)} €` : undefined
+      extra: summary.monthTotal !== undefined ? `Période en cours: ${summary.monthTotal?.toFixed(2)} €` : undefined
     },
     {
       title: 'Traitées',
