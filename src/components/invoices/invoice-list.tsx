@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { createClient } from '@/utils/supabase/client'
 import { Button } from '@/components/ui/button'
 import { LoadingSpinner } from '@/components/ui/loading-spinner'
-import { formatCurrency, formatDate, formatTitleCaseName } from '@/lib/utils'
+import { formatCurrency, formatDate, formatTitleCaseName, getActiveOrganizationId } from '@/lib/utils'
 import { FileText, Download, Eye, Trash2, CheckCircle2, Clock3, TriangleAlert } from 'lucide-react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
@@ -46,6 +46,9 @@ export function InvoiceList({ from, to }: { from?: string; to?: string }) {
       const { data: { user } } = await supabase.auth.getUser()
       if (!user) return
 
+      const { data: { user } } = await supabase.auth.getUser()
+      const orgId = user ? await getActiveOrganizationId(supabase, user.id) : null
+
       let query = supabase
         .from('invoices')
         .select('id, file_name, file_path, created_at, status, extracted_data, user_id, organization_id, supplier_id, supplier:suppliers ( id, code, display_name, validation_status, is_active )')
@@ -53,6 +56,10 @@ export function InvoiceList({ from, to }: { from?: string; to?: string }) {
 
       if (filter !== 'all') {
         query = query.eq('status', filter)
+      }
+
+      if (orgId) {
+        query = query.eq('organization_id', orgId)
       }
 
       let { data, error } = await query

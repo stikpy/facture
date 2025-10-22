@@ -37,26 +37,32 @@ export async function GET(request: NextRequest) {
     const min = minStr ? Number(minStr) : undefined
     const max = maxStr ? Number(maxStr) : undefined
 
-    // Utiliser le client service role pour éviter les effets RLS,
-    // mais filtrer par organisation(s) dont l'utilisateur est membre
-    const { data: memberships } = await (supabaseAdmin as any)
-      .from('organization_members')
-      .select('organization_id')
-      .eq('user_id', user.id)
-    
-    const orgIds = ((memberships as any[]) || []).map(m => m.organization_id)
-    const activeOrgId = (user as any)?.user_metadata?.organization_id || null
+    // Lire avec le client utilisateur (RLS) + filtre organisation courant
+    let orgId: string | null = null
+    try {
+      const { data: member } = await (supabase as any)
+        .from('organization_members')
+        .select('organization_id')
+        .eq('user_id', user.id)
+        .limit(1)
+        .single()
+      orgId = member?.organization_id || null
+    } catch {}
+    if (!orgId) {
+      const { data: userRow } = await (supabase as any)
+        .from('users')
+        .select('organization_id')
+        .eq('id', user.id)
+        .single()
+      orgId = userRow?.organization_id || null
+    }
 
-    const query = (supabaseAdmin as any)
+    let query = (supabase as any)
       .from('invoices')
       .select('created_at, extracted_data, status, user_id, supplier_id, organization_id')
       .limit(10000)
-
-    // Simpler and safer: read with user-scoped client so RLS applies
-    const { data, error } = await (supabase as any)
-      .from('invoices')
-      .select('created_at, extracted_data, status, user_id, supplier_id, organization_id')
-      .limit(10000)
+    if (orgId) query = query.eq('organization_id', orgId)
+    const { data, error } = await query
 
     if (error) throw error
 

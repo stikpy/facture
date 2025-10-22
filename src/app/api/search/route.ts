@@ -23,10 +23,32 @@ export async function GET(request: NextRequest) {
     }
 
     // On récupère d'abord les factures de l'utilisateur (filtre statut si fourni)
+    // et on limite à l'organisation active
+    // Récupération organization_id
+    let orgId: string | null = null
+    try {
+      const { data: member } = await (supabase as any)
+        .from('organization_members')
+        .select('organization_id')
+        .eq('user_id', user.id)
+        .limit(1)
+        .single()
+      orgId = member?.organization_id || null
+    } catch {}
+    if (!orgId) {
+      const { data: userRow } = await (supabase as any)
+        .from('users')
+        .select('organization_id')
+        .eq('id', user.id)
+        .single()
+      orgId = userRow?.organization_id || null
+    }
+
     let base = supabase
       .from('invoices')
       .select('*')
       .eq('user_id', user.id)
+    if (orgId) base = base.eq('organization_id', orgId)
       .order('created_at', { ascending: false })
 
     if (status !== 'all') {

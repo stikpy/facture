@@ -43,3 +43,26 @@ export function formatTitleCaseName(name: string): string {
   })
   return up.join(' ')
 }
+
+// Récupère l'organization_id actif pour un utilisateur
+export async function getActiveOrganizationId(supabase: any, userId: string): Promise<string | null> {
+  try {
+    const { data: member } = await (supabase as any)
+      .from('organization_members')
+      .select('organization_id')
+      .eq('user_id', userId)
+      .limit(1)
+      .single()
+    if (member?.organization_id) return member.organization_id
+  } catch {}
+  try {
+    const { data: userRow } = await (supabase as any)
+      .from('users')
+      .select('organization_id')
+      .eq('id', userId)
+      .single()
+    return userRow?.organization_id || null
+  } catch {
+    return null
+  }
+}
