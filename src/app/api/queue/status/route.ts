@@ -60,6 +60,28 @@ export async function GET(request: NextRequest) {
       }
     }
 
+    // Réconciliation: si la tâche est terminée/échouée mais la facture est toujours "processing",
+    // forcer la mise à jour du statut de la facture pour éviter les états bloqués dans l'UI
+    if ((task as any).status === 'completed' || (task as any).status === 'failed') {
+      try {
+        const { data: inv } = await (supabaseAdmin as any)
+          .from('invoices')
+          .select('status')
+          .eq('id', invoiceId)
+          .single()
+        const current = (inv as any)?.status
+        if (current === 'processing') {
+          let newStatus = (task as any).status === 'completed' ? 'completed' : 'error'
+          const msg = String((task as any).error_message || '')
+          if (msg.includes('duplicate_invoice_number')) newStatus = 'duplicate'
+          await (supabaseAdmin as any)
+            .from('invoices')
+            .update({ status: newStatus } as any)
+            .eq('id', invoiceId)
+        }
+      } catch {}
+    }
+
     return NextResponse.json({
       taskId: (task as any).id,
       status: (task as any).status,
