@@ -78,6 +78,13 @@ export class DocumentProcessor {
         Vous êtes un expert en extraction de données de factures. 
         Analysez le texte suivant et extrayez toutes les informations pertinentes.
         
+        IMPORTANT - RÈGLES D'IDENTIFICATION:
+        - Le FOURNISSEUR (supplier) est l'entreprise qui ÉMET la facture et qui doit être PAYÉE
+        - Le CLIENT est l'entreprise qui REÇOIT la facture et qui doit PAYER
+        - Le nom du fournisseur apparaît généralement EN HAUT de la facture, souvent avec son logo
+        - Le nom du client apparaît souvent sous "Facturé à:" ou "Client:" ou dans la section destinataire
+        - En cas de doute, cherchez qui possède le SIRET/TVA en HAUT du document = c'est le FOURNISSEUR
+        
         Contexte: {context}
         
         Extrayez les informations suivantes au format JSON:
@@ -88,12 +95,12 @@ export class DocumentProcessor {
           "total_amount": montant_total_numerique,
           "tax_amount": montant_tva_numerique,
           "subtotal": sous_total_numerique,
-          "supplier_name": "nom du fournisseur",
+          "supplier_name": "nom EXACT du fournisseur (entreprise qui émet la facture, en haut du document)",
           "supplier_address": "adresse du fournisseur",
           "supplier_email": "email du fournisseur",
           "supplier_phone": "téléphone du fournisseur",
           "supplier_vat_number": "numéro TVA du fournisseur",
-          "client_name": "nom du client",
+          "client_name": "nom du client (entreprise qui reçoit la facture)",
           "client_address": "adresse du client",
           "client_email": "email du client",
           "client_phone": "téléphone du client",
@@ -112,6 +119,7 @@ export class DocumentProcessor {
           "notes": "notes additionnelles"
         }}
         
+        ATTENTION: Le supplier_name doit être le nom de l'entreprise qui ÉMET la facture, pas celle qui la reçoit!
         Répondez uniquement avec le JSON valide, sans texte supplémentaire.
       `)
       

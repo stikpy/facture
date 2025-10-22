@@ -114,19 +114,23 @@ export async function POST(request: NextRequest) {
       const classification = await documentProcessor.classifyInvoice(extractedData)
       console.log('✅ [SERVER] Classification:', classification)
 
-      // Upsert supplier
+      // Upsert supplier avec organization_id de la facture
       try {
         const supplierName = (extractedData as any)?.supplier_name
         if (supplierName) {
-          const supplier = await upsertSupplier(String(supplierName))
+          console.log(`🏢 [SERVER] Création/Recherche du fournisseur "${supplierName}" pour l'organisation ${invoice.organization_id}`)
+          const supplier = await upsertSupplier(String(supplierName), invoice.organization_id)
           if (supplier) {
+            console.log(`✅ [SERVER] Fournisseur associé: ${supplier.display_name} (${supplier.code}, validation_status: ${supplier.validation_status})`)
             await (supabaseAdmin as any)
               .from('invoices')
               .update({ supplier_id: supplier.id } as any)
               .eq('id', fileId)
           }
         }
-      } catch (e) { console.error('Supplier upsert error:', e) }
+      } catch (e) { 
+        console.error('❌ [SERVER] Erreur lors de l\'upsert du fournisseur:', e)
+      }
 
       // Sauvegarder les données extraites
       console.log('💾 [SERVER] Sauvegarde des données extraites en base')
