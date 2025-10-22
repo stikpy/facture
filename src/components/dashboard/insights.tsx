@@ -164,6 +164,19 @@ export function Insights({ filters }: { filters?: Filters }) {
           // Bar chart for month-by-month (plus grand)
           <div className="relative">
             <svg viewBox="0 0 720 240" className="w-full h-60">
+              {/* Axe Y - repères de valeurs */}
+              {monthly.max > 0 && [0, 0.25, 0.5, 0.75, 1].map((ratio) => {
+                const y = 210 - (ratio * 170)
+                const value = monthly.max * ratio
+                return (
+                  <g key={ratio}>
+                    <line x1="0" y1={y} x2="720" y2={y} stroke="#f3f4f6" strokeWidth="1" strokeDasharray={ratio === 0 ? '0' : '4 2'} />
+                    <text x="5" y={y - 4} fontSize="9" fill="#9ca3af" fontWeight="500">
+                      {formatCurrency(value)}
+                    </text>
+                  </g>
+                )
+              })}
               {/* axe X */}
               <line x1="0" y1="210" x2="720" y2="210" stroke="#e5e7eb" strokeWidth="1" />
               {monthly.values.map((v, i) => {
