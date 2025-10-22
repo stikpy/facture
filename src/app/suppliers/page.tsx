@@ -40,6 +40,7 @@ export default function SuppliersPage() {
     supplier: null,
     supplierInfo: null
   })
+  const [organization, setOrganization] = useState<{ name?: string; vat_number?: string; address?: string } | null>(null)
 
   useEffect(() => {
     const checkAuth = async () => {
@@ -61,8 +62,29 @@ export default function SuppliersPage() {
   useEffect(() => {
     if (user) {
       fetchSuppliers()
+      fetchOrganization()
     }
   }, [user])
+
+  const fetchOrganization = async () => {
+    try {
+      const supabase = createClient()
+      const { data: userRow } = await (supabase as any)
+        .from('users')
+        .select('organization_id')
+        .eq('id', user.id)
+        .single()
+      if (!userRow?.organization_id) return
+      const { data: org } = await (supabase as any)
+        .from('organizations')
+        .select('name, address, vat_number')
+        .eq('id', userRow.organization_id)
+        .single()
+      setOrganization(org || null)
+    } catch (e) {
+      console.warn('⚠️ [SUPPLIERS] Impossible de charger l\'organisation:', e)
+    }
+  }
 
   const openValidationModal = async (supplier: Supplier) => {
     try {
@@ -105,7 +127,11 @@ export default function SuppliersPage() {
     }
   }
 
-  const updateValidationStatus = async (supplierId: string, newStatus: 'validated' | 'rejected') => {
+  const updateValidationStatus = async (
+    supplierId: string, 
+    newStatus: 'validated' | 'rejected',
+    updates?: Partial<Pick<Supplier, 'address' | 'email' | 'phone' | 'vat_number' | 'siret'>>
+  ) => {
     try {
       console.log(`🔄 [SUPPLIERS] Mise à jour du statut pour ${supplierId} → ${newStatus}`)
       
@@ -113,7 +139,7 @@ export default function SuppliersPage() {
       setSuppliers(prevSuppliers => 
         prevSuppliers.map(s => 
           s.id === supplierId 
-            ? { ...s, validation_status: newStatus, is_active: newStatus === 'validated' }
+            ? { ...s, validation_status: newStatus, is_active: newStatus === 'validated', ...(updates || {}) }
             : s
         )
       )
@@ -124,8 +150,9 @@ export default function SuppliersPage() {
         .from('suppliers')
         .update({ 
           validation_status: newStatus,
-          is_active: newStatus === 'validated' // Activer automatiquement si validé
-        })
+          is_active: newStatus === 'validated',
+          ...(updates || {})
+        } as any)
         .eq('id', supplierId)
         .select()
       
@@ -741,7 +768,6 @@ export default function SuppliersPage() {
               {/* Informations extraites */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 {/* Adresse */}
-                {validationModal.supplierInfo?.address && (
                   <div className="col-span-2">
                     <label className="block text-sm font-semibold text-gray-700 mb-2 flex items-center gap-2">
                       <svg className="w-4 h-4 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -753,14 +779,17 @@ export default function SuppliersPage() {
                     <Input 
                       type="text" 
                       value={validationModal.supplierInfo.address}
-                      className="bg-gray-50"
-                      disabled
+                      onChange={(e) => setValidationModal(v => ({ ...v, supplierInfo: { ...v.supplierInfo, address: e.target.value } }))}
+                      className=""
                     />
+                    {organization?.name && validationModal.supplier && (
+                      <p className="text-xs mt-1 text-gray-500">
+                        Astuce: l'adresse du client semble être "{organization.name}"; si vous voyez cette adresse ici, remplacez-la par l'adresse du fournisseur.
+                      </p>
+                    )}
                   </div>
-                )}
 
                 {/* Email */}
-                {validationModal.supplierInfo?.email && (
                   <div>
                     <label className="block text-sm font-semibold text-gray-700 mb-2 flex items-center gap-2">
                       <svg className="w-4 h-4 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -771,14 +800,11 @@ export default function SuppliersPage() {
                     <Input 
                       type="email" 
                       value={validationModal.supplierInfo.email}
-                      className="bg-gray-50"
-                      disabled
+                      onChange={(e) => setValidationModal(v => ({ ...v, supplierInfo: { ...v.supplierInfo, email: e.target.value } }))}
                     />
                   </div>
-                )}
 
                 {/* Téléphone */}
-                {validationModal.supplierInfo?.phone && (
                   <div>
                     <label className="block text-sm font-semibold text-gray-700 mb-2 flex items-center gap-2">
                       <svg className="w-4 h-4 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -789,14 +815,11 @@ export default function SuppliersPage() {
                     <Input 
                       type="tel" 
                       value={validationModal.supplierInfo.phone}
-                      className="bg-gray-50"
-                      disabled
+                      onChange={(e) => setValidationModal(v => ({ ...v, supplierInfo: { ...v.supplierInfo, phone: e.target.value } }))}
                     />
                   </div>
-                )}
 
                 {/* N° TVA */}
-                {validationModal.supplierInfo?.vat_number && (
                   <div>
                     <label className="block text-sm font-semibold text-gray-700 mb-2 flex items-center gap-2">
                       <svg className="w-4 h-4 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -807,14 +830,11 @@ export default function SuppliersPage() {
                     <Input 
                       type="text" 
                       value={validationModal.supplierInfo.vat_number}
-                      className="bg-gray-50"
-                      disabled
+                      onChange={(e) => setValidationModal(v => ({ ...v, supplierInfo: { ...v.supplierInfo, vat_number: e.target.value } }))}
                     />
                   </div>
-                )}
 
                 {/* SIRET */}
-                {validationModal.supplierInfo?.siret && (
                   <div>
                     <label className="block text-sm font-semibold text-gray-700 mb-2 flex items-center gap-2">
                       <svg className="w-4 h-4 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -825,11 +845,9 @@ export default function SuppliersPage() {
                     <Input 
                       type="text" 
                       value={validationModal.supplierInfo.siret}
-                      className="bg-gray-50"
-                      disabled
+                      onChange={(e) => setValidationModal(v => ({ ...v, supplierInfo: { ...v.supplierInfo, siret: e.target.value } }))}
                     />
                   </div>
-                )}
               </div>
 
               {/* Message d'information */}
@@ -872,7 +890,13 @@ export default function SuppliersPage() {
                 className="bg-gradient-to-r from-green-600 to-green-700 hover:from-green-700 hover:to-green-800 text-white shadow-md hover:shadow-lg transition-all"
                 onClick={() => {
                   if (validationModal.supplier) {
-                    updateValidationStatus(validationModal.supplier.id, 'validated')
+                    updateValidationStatus(validationModal.supplier.id, 'validated', {
+                      address: validationModal.supplierInfo?.address || undefined,
+                      email: validationModal.supplierInfo?.email || undefined,
+                      phone: validationModal.supplierInfo?.phone || undefined,
+                      vat_number: validationModal.supplierInfo?.vat_number || undefined,
+                      siret: validationModal.supplierInfo?.siret || undefined,
+                    })
                     setValidationModal({ isOpen: false, supplier: null, supplierInfo: null })
                   }
                 }}
