@@ -37,20 +37,26 @@ export async function GET(request: NextRequest) {
     })
 
     // Marquer la tâche comme en cours
-    await (supabaseAdmin as any)
-      .from('processing_queue')
-      .update({
-        status: 'processing',
-        started_at: new Date().toISOString(),
-        attempts: (task as any).attempts + 1
-      } as any)
-      .eq('id', (task as any).id)
+    {
+      const { error } = await (supabaseAdmin as any)
+        .from('processing_queue')
+        .update({
+          status: 'processing',
+          started_at: new Date().toISOString(),
+          attempts: (task as any).attempts + 1
+        } as any)
+        .eq('id', (task as any).id)
+      if (error) throw new Error(`DB update processing_queue: ${error.message}`)
+    }
 
     // Mettre à jour le statut de la facture
-    await (supabaseAdmin as any)
-      .from('invoices')
-      .update({ status: 'processing' } as any)
-      .eq('id', (task as any).invoice_id)
+    {
+      const { error } = await (supabaseAdmin as any)
+        .from('invoices')
+        .update({ status: 'processing' } as any)
+        .eq('id', (task as any).invoice_id)
+      if (error) throw new Error(`DB update invoices->processing: ${error.message}`)
+    }
 
     try {
       const invoice = (task as any).invoices
@@ -166,14 +172,17 @@ export async function GET(request: NextRequest) {
 
       // Sauvegarder les résultats
       console.log('💾 [WORKER] Sauvegarde des résultats')
-      await (supabaseAdmin as any)
-        .from('invoices')
-        .update({
-          extracted_data: extractedData,
-          classification: classification.category,
-          status: 'completed'
-        } as any)
-        .eq('id', (task as any).invoice_id)
+      {
+        const { error } = await (supabaseAdmin as any)
+          .from('invoices')
+          .update({
+            extracted_data: extractedData,
+            classification: classification.category,
+            status: 'completed'
+          } as any)
+          .eq('id', (task as any).invoice_id)
+        if (error) throw new Error(`DB update invoices->completed: ${error.message}`)
+      }
 
       // Créer les articles de facture
       if (extractedData.items && extractedData.items.length > 0) {
@@ -185,19 +194,25 @@ export async function GET(request: NextRequest) {
           total_price: item.total_price
         }))
 
-        await (supabaseAdmin as any)
-          .from('invoice_items')
-          .insert(items as any)
+        {
+          const { error } = await (supabaseAdmin as any)
+            .from('invoice_items')
+            .insert(items as any)
+          if (error) throw new Error(`DB insert invoice_items: ${error.message}`)
+        }
       }
 
       // Marquer la tâche comme complétée
-      await (supabaseAdmin as any)
-        .from('processing_queue')
-        .update({
-          status: 'completed',
-          completed_at: new Date().toISOString()
-        } as any)
-        .eq('id', (task as any).id)
+      {
+        const { error } = await (supabaseAdmin as any)
+          .from('processing_queue')
+          .update({
+            status: 'completed',
+            completed_at: new Date().toISOString()
+          } as any)
+          .eq('id', (task as any).id)
+        if (error) throw new Error(`DB update processing_queue->completed: ${error.message}`)
+      }
 
       console.log('✅ [WORKER] Tâche complétée avec succès')
 
