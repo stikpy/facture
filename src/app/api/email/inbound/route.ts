@@ -93,6 +93,7 @@ async function findOrganizationForRecipients(addresses: string[]): Promise<strin
 
 export async function POST(request: NextRequest) {
   try {
+    const perfStart = Date.now()
     const raw = await request.text()
     const svixId = request.headers.get('svix-id') || ''
     const svixTimestamp = request.headers.get('svix-timestamp') || ''
@@ -105,6 +106,7 @@ export async function POST(request: NextRequest) {
 
     // Déterminer provider et vérifier auth via Resend (Svix) sinon Postmark
     let provider: 'resend' | 'postmark' | 'unknown' = 'unknown'
+    const tVerifyStart = Date.now()
     let event: any | null = await verifyResendWebhook(raw, request)
     if (event && event?.type === 'email.received') {
       provider = 'resend'
@@ -118,6 +120,7 @@ export async function POST(request: NextRequest) {
       provider = 'postmark'
       console.log('[inbound] provider detected: postmark')
     }
+    console.log('[inbound] timing.verifyAuth.ms', Date.now() - tVerifyStart)
 
     const parsed = event ?? JSON.parse(raw)
     const payload = provider === 'resend' ? parsed.data : parsed
@@ -126,6 +129,7 @@ export async function POST(request: NextRequest) {
       emailId: provider === 'resend' ? parsed?.data?.email_id : undefined
     })
     const addresses = collectAddressesFromPayload(payload)
+    const tResolveStart = Date.now()
     const organizationId = await findOrganizationForRecipients(addresses)
     let userId = await findUserIdForRecipients(addresses)
     // Si alias lié à une org, choisir un membre comme user par défaut
@@ -157,6 +161,7 @@ export async function POST(request: NextRequest) {
       senderOk = !!allow
     }
     console.log('[inbound] recipients resolved', { addresses, organizationId, userId, senderEmail, senderOk })
+    console.log('[inbound] timing.resolveRecipients.ms', Date.now() - tResolveStart)
 
     if (organizationId && !senderOk) {
       console.warn('[inbound] ignoring: sender not allowed for org', { organizationId, senderEmail })
@@ -178,6 +183,7 @@ export async function POST(request: NextRequest) {
       const resendApiKey = process.env.RESEND_API_KEY || ''
       const resend = new Resend(resendApiKey)
       const emailId = parsed.data?.email_id
+      const tListStart = Date.now()
       console.log('[inbound] fetching attachments (resend)', { emailId, hasApiKey: Boolean(resendApiKey) })
 
       // Retry simple pour gérer l'éventuelle latence d'indexation côté Resend
@@ -201,6 +207,7 @@ export async function POST(request: NextRequest) {
       }
 
       if (!attachments.length) {
+        console.log('[inbound] timing.attachments.list.ms', Date.now() - tListStart)
         try {
           const emailDetails = await (resend as any).emails.receiving.get(emailId)
           console.log('[inbound] email details (resend)', {
@@ -216,12 +223,14 @@ export async function POST(request: NextRequest) {
         // Répondre 200 pour éviter les retries si aucun attachement
         return NextResponse.json({ success: true, ignored: 'aucune-piece-jointe', provider })
       }
+      console.log('[inbound] timing.attachments.list.ms', Date.now() - tListStart)
       console.log('[inbound] attachments (resend)', {
         emailId,
         count: attachments.length,
         files: attachments.map((a: any) => a?.filename).filter(Boolean)
       })
       for (const att of attachments) {
+        const tAttStart = Date.now()
         const contentType = att?.content_type || 'application/octet-stream'
         if (!allowedTypes.has(contentType)) continue
         const filename = att?.filename || 'attachment'
@@ -254,6 +263,7 @@ export async function POST(request: NextRequest) {
         await (supabaseAdmin as any)
           .from('processing_queue')
           .insert({ invoice_id: invoice.id, user_id: userId, status: 'pending' } as any)
+        console.log('[inbound] timing.attachments.single.ms', Date.now() - tAttStart)
       }
     } else {
       const atts: any[] = Array.isArray(payload?.attachments)
@@ -270,6 +280,7 @@ export async function POST(request: NextRequest) {
         files: atts.map((a: any) => a?.filename || a?.name || a?.Name).filter(Boolean)
       })
       for (const att of atts) {
+        const tAttStart = Date.now()
         const contentType = att?.contentType || att?.ContentType || 'application/octet-stream'
         if (!allowedTypes.has(contentType)) continue
         const filename = att?.filename || att?.name || att?.Name || 'attachment'
@@ -306,9 +317,11 @@ export async function POST(request: NextRequest) {
         await (supabaseAdmin as any)
           .from('processing_queue')
           .insert({ invoice_id: invoice.id, user_id: userId, status: 'pending' } as any)
+        console.log('[inbound] timing.attachments.single.ms', Date.now() - tAttStart)
       }
     }
 
+    const tTriggerStart = Date.now()
     try {
       const origin = (() => {
         try { return new URL(request.url).origin } catch { return process.env.NEXT_PUBLIC_APP_URL || '' }
@@ -317,7 +330,8 @@ export async function POST(request: NextRequest) {
       fetch(`${origin}/api/queue/worker`, { cache: 'no-store' }).catch(() => {})
     } catch {}
 
-    console.log('[inbound] done', { createdCount: created.length, provider })
+    console.log('[inbound] timing.triggerWorker.ms', Date.now() - tTriggerStart)
+    console.log('[inbound] done', { createdCount: created.length, provider, totalMs: Date.now() - perfStart })
     return NextResponse.json({ success: true, created, provider })
   } catch (e: any) {
     console.error('Inbound email error:', e)

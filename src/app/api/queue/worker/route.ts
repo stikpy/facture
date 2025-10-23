@@ -11,6 +11,7 @@ export const runtime = 'nodejs'
 export async function GET(request: NextRequest) {
   console.log('🔄 [WORKER] Démarrage du worker')
   const startedAt = Date.now()
+  const time = () => `${Date.now() - startedAt}ms`
   
   try {
     // Récupérer la prochaine tâche à traiter
@@ -73,7 +74,7 @@ export async function GET(request: NextRequest) {
       console.log(`📥 [WORKER] Téléchargement du fichier: ${(invoice as any).file_path}`)
       const storageService = new StorageService()
       const fileBuffer = await storageService.downloadFile((invoice as any).file_path)
-      console.log('[WORKER] Buffer téléchargé (bytes):', fileBuffer?.length)
+      console.log('[WORKER] Buffer téléchargé (bytes):', fileBuffer?.length, '|', time())
 
       let extractedText = ''
       let pageTexts: string[] = []
@@ -83,8 +84,9 @@ export async function GET(request: NextRequest) {
       if ((invoice as any).mime_type === 'application/pdf') {
         console.log('📄 [WORKER] Traitement PDF avec OCR')
         const ocrProcessor = new OCRProcessor()
+        const tOcrStart = Date.now()
         const texts = await ocrProcessor.processPDF(fileBuffer)
-        console.log('[WORKER] OCR PDF textes (n):', texts.length, 'tailles:', texts.map(t => t?.length))
+        console.log('[WORKER] OCR PDF textes (n):', texts.length, 'tailles:', texts.map(t => t?.length), '| ocr=', Date.now() - tOcrStart, 'ms')
         extractedText = texts.join('\n')
         pageTexts = texts
         
@@ -102,7 +104,7 @@ export async function GET(request: NextRequest) {
         await ocrProcessor.terminate()
       }
 
-      console.log('[WORKER] Taille texte extrait:', extractedText?.length)
+      console.log('[WORKER] Taille texte extrait:', extractedText?.length, '|', time())
       if (!extractedText.trim()) {
         console.warn('[WORKER] PDF scanné sans texte - marquage pour OCR manuel')
         // Marquer comme "needs_manual_ocr" au lieu de throw
@@ -135,7 +137,9 @@ export async function GET(request: NextRequest) {
       // Traitement IA (avec retry sur rotations alternatives si extraction vide)
       console.log('🤖 [WORKER] Traitement IA')
       const documentProcessor = new DocumentProcessor()
+      const tAiStart = Date.now()
       let extractedData = await documentProcessor.processDocument(extractedText, (invoice as any).file_name)
+      console.log('[WORKER] IA extraction done in', Date.now() - tAiStart, 'ms')
       
       // POST-VALIDATION: Vérifier que fournisseur ≠ client
       if ((extractedData as any)?.supplier_name && (extractedData as any)?.client_name) {
@@ -175,7 +179,9 @@ export async function GET(request: NextRequest) {
         } catch {}
       }
 
+      const tClassStart = Date.now()
       let classification = await documentProcessor.classifyInvoice(extractedData)
+      console.log('[WORKER] IA classification done in', Date.now() - tClassStart, 'ms')
       
       // Vérifier si l'extraction a échoué (tous les champs importants sont null)
       const isExtractionEmpty = !extractedData.invoice_number && 
@@ -257,10 +263,11 @@ export async function GET(request: NextRequest) {
         const supplierName = (extractedData as any)?.supplier_name
         if (supplierName && (invoice as any).organization_id) {
           console.log(`🏢 [WORKER] Création/Recherche du fournisseur "${supplierName}" pour l'organisation ${(invoice as any).organization_id}`)
+          const tUpsertStart = Date.now()
           const supplier = await upsertSupplier(String(supplierName), (invoice as any).organization_id)
           if (supplier) {
             supplierId = supplier.id
-            console.log(`✅ [WORKER] Fournisseur associé: ${supplier.display_name} (${supplier.code}, validation_status: ${supplier.validation_status})`)
+            console.log(`✅ [WORKER] Fournisseur associé: ${supplier.display_name} (${supplier.code}, validation_status: ${supplier.validation_status}) | upsert=`, Date.now() - tUpsertStart, 'ms')
           }
         } else {
           console.warn('⚠️ [WORKER] Impossible de créer le fournisseur: supplierName ou organization_id manquant')
@@ -283,6 +290,7 @@ export async function GET(request: NextRequest) {
           updateData.supplier_id = supplierId
         }
         
+        const tSaveStart = Date.now()
         const { error } = await (supabaseAdmin as any)
           .from('invoices')
           .update(updateData)
@@ -312,6 +320,7 @@ export async function GET(request: NextRequest) {
           }
           throw new Error(`DB update invoices->completed: ${error.message}`)
         }
+        console.log('[WORKER] Save invoices done in', Date.now() - tSaveStart, 'ms')
       }
 
       // Créer les articles de facture
@@ -344,7 +353,7 @@ export async function GET(request: NextRequest) {
         if (error) throw new Error(`DB update processing_queue->completed: ${error.message}`)
       }
 
-      console.log('✅ [WORKER] Tâche complétée avec succès')
+      console.log('✅ [WORKER] Tâche complétée avec succès | total=', time())
 
       return NextResponse.json({
         success: true,
