@@ -80,6 +80,17 @@ async function findUserIdForRecipients(addresses: string[]): Promise<string | nu
   return null
 }
 
+async function findOrganizationForRecipients(addresses: string[]): Promise<string | null> {
+  const local = addresses.map((a) => a.split('@')[0]).find(Boolean)
+  if (!local) return null
+  const { data } = await (supabaseAdmin as any)
+    .from('inbound_aliases')
+    .select('organization_id')
+    .eq('alias', local.toLowerCase())
+    .single()
+  return data?.organization_id ?? null
+}
+
 export async function POST(request: NextRequest) {
   try {
     const raw = await request.text()
@@ -115,8 +126,19 @@ export async function POST(request: NextRequest) {
       emailId: provider === 'resend' ? parsed?.data?.email_id : undefined
     })
     const addresses = collectAddressesFromPayload(payload)
-    const userId = await findUserIdForRecipients(addresses)
-    console.log('[inbound] recipients resolved', { addresses, userId })
+    const organizationId = await findOrganizationForRecipients(addresses)
+    let userId = await findUserIdForRecipients(addresses)
+    // Si alias lié à une org, choisir un membre comme user par défaut
+    if (!userId && organizationId) {
+      const { data: member } = await (supabaseAdmin as any)
+        .from('organization_members')
+        .select('user_id')
+        .eq('organization_id', organizationId)
+        .limit(1)
+        .single()
+      userId = member?.user_id || null
+    }
+    console.log('[inbound] recipients resolved', { addresses, organizationId, userId })
 
     if (!userId) {
       // Répondre 200 pour éviter les retries infinis côté Resend
@@ -160,6 +182,7 @@ export async function POST(request: NextRequest) {
           .from('invoices')
           .insert({
             user_id: userId,
+            organization_id: organizationId || null,
             file_name: filename,
             file_path: path,
             file_size: buffer.length,
@@ -211,6 +234,7 @@ export async function POST(request: NextRequest) {
           .from('invoices')
           .insert({
             user_id: userId,
+            organization_id: organizationId || null,
             file_name: filename,
             file_path: path,
             file_size: buffer.length,
