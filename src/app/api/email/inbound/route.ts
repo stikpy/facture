@@ -81,6 +81,19 @@ async function findUserIdForRecipients(addresses: string[]): Promise<string | nu
 }
 
 async function findOrganizationForRecipients(addresses: string[]): Promise<string | null> {
+  // 1) Résolution par adresse complète (prioritaire)
+  for (const addr of addresses) {
+    const a = String(addr || '').toLowerCase()
+    if (!a) continue
+    const { data: full } = await (supabaseAdmin as any)
+      .from('inbound_addresses')
+      .select('organization_id')
+      .eq('full_address', a)
+      .single()
+    if (full?.organization_id) return full.organization_id
+  }
+
+  // 2) Fallback: résolution par alias (local-part)
   const local = addresses.map((a) => a.split('@')[0]).find(Boolean)
   if (!local) return null
   const { data } = await (supabaseAdmin as any)

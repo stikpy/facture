@@ -9,6 +9,8 @@ export default function OrgAdminPage() {
   const [members, setMembers] = useState<any[]>([])
   const [newOrgName, setNewOrgName] = useState('')
   const [inviteEmail, setInviteEmail] = useState('')
+  const [inboundAddress, setInboundAddress] = useState('')
+  const [inboundList, setInboundList] = useState<Array<{full_address:string, created_at:string}>>([])
 
   const load = async () => {
     setLoading(true)
@@ -18,6 +20,7 @@ export default function OrgAdminPage() {
       setOrgs(data.organizations || [])
       setActiveOrgId(data.activeOrganizationId || null)
     }
+    await loadInboundAddresses()
     await loadMembers()
     setLoading(false)
   }
@@ -26,6 +29,27 @@ export default function OrgAdminPage() {
     const res = await fetch('/api/orgs/members')
     const data = await res.json()
     if (res.ok) setMembers(data.members || [])
+  }
+
+  const loadInboundAddresses = async () => {
+    const res = await fetch('/api/orgs/inbound-addresses')
+    const data = await res.json()
+    if (res.ok) setInboundList(data.entries || [])
+  }
+
+  const addInboundAddress = async () => {
+    const v = inboundAddress.trim().toLowerCase()
+    if (!v) return
+    const res = await fetch('/api/orgs/inbound-addresses', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ full_address: v }) })
+    if (res.ok) {
+      setInboundAddress('')
+      await loadInboundAddresses()
+    }
+  }
+
+  const removeInbound = async (addr: string) => {
+    const res = await fetch(`/api/orgs/inbound-addresses?full_address=${encodeURIComponent(addr)}`, { method: 'DELETE' })
+    if (res.ok) await loadInboundAddresses()
   }
 
   useEffect(() => { load() }, [])
@@ -76,6 +100,35 @@ export default function OrgAdminPage() {
         <div className="mt-4 flex gap-2">
           <input value={newOrgName} onChange={(e)=>setNewOrgName(e.target.value)} placeholder="Nouvelle organisation" className="border rounded px-2 py-1 flex-1" />
           <button onClick={createOrg} className="px-3 py-1 rounded bg-blue-600 text-white text-sm">Créer</button>
+        </div>
+      </section>
+
+      <section className="bg-white rounded border p-4">
+        <h2 className="font-medium mb-3">Adresse(s) de réception</h2>
+        <div className="text-sm text-gray-600 mb-2">Déclarez l'adresse complète qui reçoit les factures (ex: factures@client.tld). Les emails envoyés à cette adresse seront rattachés à l'organisation active.</div>
+        <div className="flex gap-2">
+          <input value={inboundAddress} onChange={(e)=>setInboundAddress(e.target.value)} placeholder="factures@client.tld" className="border rounded px-2 py-1 flex-1" />
+          <button onClick={addInboundAddress} className="px-3 py-1 rounded bg-blue-600 text-white text-sm">Ajouter</button>
+        </div>
+        <div className="mt-4">
+          {inboundList.length === 0 ? (
+            <div className="text-sm text-gray-500">Aucune adresse déclarée.</div>
+          ) : (
+            <ul className="divide-y">
+              {inboundList.map((e)=> (
+                <li key={e.full_address} className="flex items-center justify-between py-2">
+                  <div>
+                    <span className="font-mono text-sm">{e.full_address}</span>
+                    <span className="text-xs text-gray-500 ml-2">{new Date(e.created_at).toLocaleString()}</span>
+                  </div>
+                  <div className="flex gap-2">
+                    <button className="text-sm px-2 py-1 rounded border" onClick={()=>navigator.clipboard.writeText(e.full_address)}>Copier</button>
+                    <button className="text-sm px-2 py-1 rounded border" onClick={()=>removeInbound(e.full_address)}>Supprimer</button>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
         </div>
       </section>
 
