@@ -93,15 +93,8 @@ async function findOrganizationForRecipients(addresses: string[]): Promise<strin
     if (full?.organization_id) return full.organization_id
   }
 
-  // 2) Fallback: résolution par alias (local-part)
-  const local = addresses.map((a) => a.split('@')[0]).find(Boolean)
-  if (!local) return null
-  const { data } = await (supabaseAdmin as any)
-    .from('inbound_aliases')
-    .select('organization_id')
-    .eq('alias', local.toLowerCase())
-    .single()
-  return data?.organization_id ?? null
+  // Aucun mapping trouvé
+  return null
 }
 
 export async function POST(request: NextRequest) {
