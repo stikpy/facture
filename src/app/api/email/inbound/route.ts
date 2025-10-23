@@ -138,7 +138,30 @@ export async function POST(request: NextRequest) {
         .single()
       userId = member?.user_id || null
     }
-    console.log('[inbound] recipients resolved', { addresses, organizationId, userId })
+    // Valider l’expéditeur contre l’allowlist par organisation si org détectée
+    let senderOk = true
+    let senderEmail = ''
+    try {
+      // Resend: from est string genre "Name <email>", on extrait l'email
+      const fromVal = provider === 'resend' ? parsed?.data?.from : payload?.From || payload?.from
+      const match = typeof fromVal === 'string' ? fromVal.match(/<([^>]+)>/) : null
+      senderEmail = (match?.[1] || fromVal || '').toString().trim().toLowerCase()
+    } catch {}
+    if (organizationId && senderEmail) {
+      const { data: allow } = await (supabaseAdmin as any)
+        .from('organization_sender_allowlist')
+        .select('id')
+        .eq('organization_id', organizationId)
+        .eq('sender_email', senderEmail)
+        .maybeSingle?.() ?? { data: null }
+      senderOk = !!allow
+    }
+    console.log('[inbound] recipients resolved', { addresses, organizationId, userId, senderEmail, senderOk })
+
+    if (organizationId && !senderOk) {
+      console.warn('[inbound] ignoring: sender not allowed for org', { organizationId, senderEmail })
+      return NextResponse.json({ success: true, ignored: 'expediteur-non-autorise', organizationId, provider })
+    }
 
     if (!userId) {
       // Répondre 200 pour éviter les retries infinis côté Resend
