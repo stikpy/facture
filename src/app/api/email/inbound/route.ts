@@ -187,7 +187,8 @@ export async function POST(request: NextRequest) {
       for (let attempt = 1; attempt <= maxAttempts; attempt++) {
         try {
           const listResp = await (resend as any).attachments.receiving.list({ emailId })
-          attachments = listResp?.data || []
+          const d = listResp?.data
+          attachments = Array.isArray(d) ? d : (Array.isArray(d?.data) ? d.data : [])
           if (attachments.length > 0) {
             break
           }
@@ -200,6 +201,17 @@ export async function POST(request: NextRequest) {
       }
 
       if (!attachments.length) {
+        try {
+          const emailDetails = await (resend as any).emails.receiving.get(emailId)
+          console.log('[inbound] email details (resend)', {
+            emailId,
+            hasHtml: Boolean(emailDetails?.data?.html),
+            hasText: Boolean(emailDetails?.data?.text),
+            headersCount: emailDetails?.data?.headers ? Object.keys(emailDetails.data.headers).length : 0,
+          })
+        } catch (e) {
+          console.warn('[inbound] emails.receiving.get failed', { emailId, error: (e as Error)?.message })
+        }
         console.log('[inbound] no attachments (resend) after retries', { emailId, attempts: maxAttempts })
         // Répondre 200 pour éviter les retries si aucun attachement
         return NextResponse.json({ success: true, ignored: 'aucune-piece-jointe', provider })
