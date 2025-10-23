@@ -232,10 +232,32 @@ export async function GET(request: NextRequest) {
         classification = await documentProcessor.classifyInvoice(extractedData)
       }
       
+      // Log de synthèse pour corréler avec l'affichage UI
+      try {
+        const ed: any = extractedData || {}
+        const summary = {
+          invoice_id: (task as any).invoice_id,
+          file_name: (invoice as any).file_name,
+          supplier_name: ed.supplier_name || null,
+          client_name: ed.client_name || null,
+          invoice_number: ed.invoice_number || null,
+          invoice_date: ed.invoice_date || null,
+          due_date: ed.due_date || null,
+          totals: {
+            subtotal: ed.subtotal ?? null,
+            tax_amount: ed.tax_amount ?? null,
+            total_amount: ed.total_amount ?? null,
+          },
+          currency: ed.currency || null,
+          items_count: Array.isArray(ed.items) ? ed.items.length : 0,
+        }
+        console.log('[WORKER] Extracted summary:', summary)
+      } catch {}
+
       console.log('[WORKER] Classification:', classification)
-      console.log('[WORKER] ===== DONNÉES EXTRAITES =====')
+      console.log('[WORKER] ===== DONNÉES EXTRAITES (JSON) =====')
       console.log(JSON.stringify(extractedData, null, 2))
-      console.log('[WORKER] ==============================')
+      console.log('[WORKER] ====================================')
 
       // Nettoyage supplémentaire: éviter d'enregistrer l'adresse/TVA du CLIENT dans les champs fournisseur si l'IA s'est trompée
       try {
@@ -321,6 +343,43 @@ export async function GET(request: NextRequest) {
           throw new Error(`DB update invoices->completed: ${error.message}`)
         }
         console.log('[WORKER] Save invoices done in', Date.now() - tSaveStart, 'ms')
+        try {
+          // Snapshot après sauvegarde pour vérifier ce que l'UI peut lire
+          const { data: saved } = await (supabaseAdmin as any)
+            .from('invoices')
+            .select('id, status, classification, organization_id, supplier_id, extracted_data')
+            .eq('id', (task as any).invoice_id)
+            .single()
+
+          const ed: any = (saved as any)?.extracted_data || {}
+          const asNum = (v: any) => typeof v === 'number' ? Number(v.toFixed(2)) : null
+          const mismatch: any = {}
+          if (asNum(ed.subtotal) !== asNum((extractedData as any)?.subtotal)) mismatch.subtotal = { saved: ed.subtotal, extracted: (extractedData as any)?.subtotal }
+          if (asNum(ed.tax_amount) !== asNum((extractedData as any)?.tax_amount)) mismatch.tax_amount = { saved: ed.tax_amount, extracted: (extractedData as any)?.tax_amount }
+          if (asNum(ed.total_amount) !== asNum((extractedData as any)?.total_amount)) mismatch.total_amount = { saved: ed.total_amount, extracted: (extractedData as any)?.total_amount }
+
+          console.log('[WORKER] Saved snapshot:', {
+            id: (saved as any)?.id,
+            status: (saved as any)?.status,
+            classification: (saved as any)?.classification,
+            organization_id: (saved as any)?.organization_id,
+            supplier_id: (saved as any)?.supplier_id,
+            extracted: {
+              supplier_name: ed?.supplier_name || null,
+              client_name: ed?.client_name || null,
+              invoice_number: ed?.invoice_number || null,
+              invoice_date: ed?.invoice_date || null,
+              due_date: ed?.due_date || null,
+              subtotal: ed?.subtotal ?? null,
+              tax_amount: ed?.tax_amount ?? null,
+              total_amount: ed?.total_amount ?? null,
+              items_count: Array.isArray(ed?.items) ? ed.items.length : 0,
+            },
+            mismatch
+          })
+        } catch (snapErr) {
+          console.warn('[WORKER] Snapshot post-save échoué:', snapErr)
+        }
       }
 
       // Créer les articles de facture
