@@ -4,13 +4,13 @@ import { useEffect, useMemo, useState } from 'react'
 import { createClient } from '@/utils/supabase/client'
 import { Button } from '@/components/ui/button'
 import { LoadingSpinner } from '@/components/ui/loading-spinner'
-import { formatCurrency, formatDate, formatTitleCaseName, getActiveOrganizationId } from '@/lib/utils'
+import { formatCurrency, formatTitleCaseName, getActiveOrganizationId } from '@/lib/utils'
 import { FileText, Download, Eye, Trash2, CheckCircle2, Clock3, TriangleAlert } from 'lucide-react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 
 export function InvoiceList({ from, to }: { from?: string; to?: string }) {
-  const [invoices, setInvoices] = useState<any[]>([])
+  const [rawInvoices, setRawInvoices] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
   const [filter, setFilter] = useState<'all' | 'completed' | 'processing' | 'error'>('all')
   const [searchTerm, setSearchTerm] = useState('')
@@ -38,13 +38,21 @@ export function InvoiceList({ from, to }: { from?: string; to?: string }) {
 
   useEffect(() => {
     fetchInvoices()
-  }, [filter, searchTerm, from, to])
+  }, [filter, from, to])
+
+  useEffect(() => {
+    setPage(1)
+  }, [searchTerm, filter, from, to])
 
   const fetchInvoices = async () => {
     try {
+      setLoading(true)
       const supabase = createClient()
       const { data: { user } } = await supabase.auth.getUser()
-      if (!user) return
+      if (!user) {
+        setRawInvoices([])
+        return
+      }
       const orgId = await getActiveOrganizationId(supabase, user.id)
 
       let query = supabase
@@ -81,67 +89,11 @@ export function InvoiceList({ from, to }: { from?: string; to?: string }) {
         })
       }
 
-      // Filtre complémentaire côté client (recherche texte + montants)
-      if (searchTerm.trim()) {
-        const term = searchTerm.trim().toLowerCase()
-        const maybeAmount = Number(term.replace(',', '.'))
-        const isAmount = !Number.isNaN(maybeAmount)
-
-        const normalizeAmountStrings = (n: number) => {
-          const s1 = n.toFixed(2) // 162.63
-          const s2 = s1.replace('.', ',') // 162,63
-          const s3 = String(Math.round(n)) // 163
-          const s4 = String(Math.floor(n)) // 162
-          const s5 = String(n) // raw
-          return [s1, s2, s3, s4, s5]
-        }
-
-        data = (data || []).filter((inv: any) => {
-          const ed = inv.extracted_data || {}
-          const items = Array.isArray(ed.items) ? ed.items : []
-
-          // Recherche texte: fichier, fournisseur, client, numéro, items.description
-          const hay = [
-            inv.file_name,
-            inv.mime_type,
-            ed.invoice_number,
-            ed.supplier_name,
-            inv?.supplier?.display_name,
-            inv?.supplier?.code,
-            ed.client_name,
-            ...items.map((it: any) => it?.description)
-          ]
-            .filter(Boolean)
-            .join(' ')
-            .toLowerCase()
-
-          const textMatch = hay.includes(term)
-
-          if (!isAmount) return textMatch
-
-          // Recherche montant: TTC/HT/TVA + items (unit/total)
-          const amountFields = [ed.total_amount, ed.subtotal, ed.tax_amount]
-            .filter((n: any) => typeof n === 'number') as number[]
-          const itemAmounts = items
-            .flatMap((it: any) => [it?.unit_price, it?.total_price])
-            .filter((n: any) => typeof n === 'number') as number[]
-          const allAmounts = [...amountFields, ...itemAmounts]
-
-          const amountMatch = allAmounts.some((n) => {
-            if (Math.abs(n - maybeAmount) < 0.01) return true // match précis
-            if (Math.floor(n) === Math.floor(maybeAmount)) return true // match entier
-            const tokens = normalizeAmountStrings(n)
-            return tokens.some((t) => t.includes(term))
-          })
-
-          return textMatch || amountMatch
-        })
-      }
-
-      setInvoices(data as any || [])
+      setRawInvoices(data as any || [])
     } catch (error) {
       console.error('Erreur lors du chargement des factures:', error)
-    } finally {
+    }
+    finally {
       setLoading(false)
     }
   }
@@ -158,7 +110,7 @@ export function InvoiceList({ from, to }: { from?: string; to?: string }) {
 
       if (error) throw error
       
-      setInvoices(prev => prev.filter(invoice => invoice.id !== invoiceId))
+      setRawInvoices(prev => prev.filter(invoice => invoice.id !== invoiceId))
     } catch (error) {
       console.error('Erreur lors de la suppression:', error)
       alert('Erreur lors de la suppression')
@@ -177,7 +129,7 @@ export function InvoiceList({ from, to }: { from?: string; to?: string }) {
         .delete()
         .in('id', ids)
       if (error) throw error
-      setInvoices(prev => prev.filter(inv => !ids.includes((inv as any).id)))
+      setRawInvoices(prev => prev.filter(inv => !ids.includes((inv as any).id)))
       setSelected({})
     } catch (error) {
       console.error('Erreur suppression multiple:', error)
@@ -275,9 +227,67 @@ export function InvoiceList({ from, to }: { from?: string; to?: string }) {
 
   const toggleAll = (checked: boolean) => {
     const next: Record<string, boolean> = {}
-    invoices.forEach((i) => (next[i.id] = checked))
+    filteredInvoices.forEach((i) => (next[i.id] = checked))
     setSelected(next)
   }
+
+  const filteredInvoices = useMemo(() => {
+    if (!searchTerm.trim()) return rawInvoices
+
+    const term = searchTerm.trim().toLowerCase()
+    const maybeAmount = Number(term.replace(',', '.'))
+    const isAmount = !Number.isNaN(maybeAmount)
+
+    const normalizeAmountStrings = (n: number) => {
+      const s1 = n.toFixed(2) // 162.63
+      const s2 = s1.replace('.', ',') // 162,63
+      const s3 = String(Math.round(n)) // 163
+      const s4 = String(Math.floor(n)) // 162
+      const s5 = String(n) // raw
+      return [s1, s2, s3, s4, s5]
+    }
+
+    return rawInvoices.filter((inv: any) => {
+      const ed = inv.extracted_data || {}
+      const items = Array.isArray(ed.items) ? ed.items : []
+
+      // Recherche texte: fichier, fournisseur, client, numéro, items.description
+      const hay = [
+        inv.file_name,
+        inv.mime_type,
+        ed.invoice_number,
+        ed.supplier_name,
+        inv?.supplier?.display_name,
+        inv?.supplier?.code,
+        ed.client_name,
+        ...items.map((it: any) => it?.description)
+      ]
+        .filter(Boolean)
+        .join(' ')
+        .toLowerCase()
+
+      const textMatch = hay.includes(term)
+
+      if (!isAmount) return textMatch
+
+      // Recherche montant: TTC/HT/TVA + items (unit/total)
+      const amountFields = [ed.total_amount, ed.subtotal, ed.tax_amount]
+        .filter((n: any) => typeof n === 'number') as number[]
+      const itemAmounts = items
+        .flatMap((it: any) => [it?.unit_price, it?.total_price])
+        .filter((n: any) => typeof n === 'number') as number[]
+      const allAmounts = [...amountFields, ...itemAmounts]
+
+      const amountMatch = allAmounts.some((n) => {
+        if (Math.abs(n - maybeAmount) < 0.01) return true // match précis
+        if (Math.floor(n) === Math.floor(maybeAmount)) return true // match entier
+        const tokens = normalizeAmountStrings(n)
+        return tokens.some((t) => t.includes(term))
+      })
+
+      return textMatch || amountMatch
+    })
+  }, [rawInvoices, searchTerm])
 
   // Tri + pagination (calculés une seule fois par changement d'état)
   const sortedInvoices = useMemo(() => {
@@ -293,7 +303,7 @@ export function InvoiceList({ from, to }: { from?: string; to?: string }) {
         default: return new Date(ed.invoice_date || inv.created_at || 0).getTime()
       }
     }
-    const arr = [...invoices]
+    const arr = [...filteredInvoices]
     arr.sort((a: any, b: any) => {
       const av = getKey(a)
       const bv = getKey(b)
@@ -301,7 +311,7 @@ export function InvoiceList({ from, to }: { from?: string; to?: string }) {
       return sortDir === 'asc' ? String(av).localeCompare(String(bv)) : String(bv).localeCompare(String(av))
     })
     return arr
-  }, [invoices, sortKey, sortDir])
+  }, [filteredInvoices, sortKey, sortDir])
 
   const pagedInvoices = useMemo(() => {
     const start = (page - 1) * pageSize
@@ -352,7 +362,7 @@ export function InvoiceList({ from, to }: { from?: string; to?: string }) {
       </div>
 
       {/* Tableau façon Yooz */}
-      {invoices.length === 0 ? (
+      {filteredInvoices.length === 0 ? (
         <div className="text-center py-12">
           <FileText className="mx-auto h-12 w-12 text-gray-400" />
           <h3 className="mt-2 text-sm font-medium text-gray-900">Aucune facture</h3>
@@ -381,7 +391,6 @@ export function InvoiceList({ from, to }: { from?: string; to?: string }) {
                 const ed: any = inv.extracted_data || {}
                 const fileNameDisplay = truncate(inv.file_name, 40)
                 const supplierDisplay = truncate(formatTitleCaseName(String(inv?.supplier?.display_name || ed.supplier_name || '')), 30)
-                const invoiceNumberDisplay = truncate(String(ed.invoice_number || ''), 20)
                 const rowIndex = (page - 1) * pageSize + idx + 1
                 
                 // Vérifier si le fournisseur est en attente de validation
@@ -443,7 +452,7 @@ export function InvoiceList({ from, to }: { from?: string; to?: string }) {
               })}
             </tbody>
           </table>
-          {invoices.length > pageSize && (
+          {filteredInvoices.length > pageSize && (
             <div className="flex items-center justify-between p-2 text-xs border-t bg-gray-50">
               <div className="flex items-center space-x-2">
                 <span className="text-gray-600">Lignes par page</span>
@@ -452,11 +461,11 @@ export function InvoiceList({ from, to }: { from?: string; to?: string }) {
                 </select>
               </div>
               <div className="text-gray-600">
-                {Math.min((page-1)*pageSize+1, invoices.length)}–{Math.min(page*pageSize, invoices.length)} sur {invoices.length}
+                {Math.min((page-1)*pageSize+1, filteredInvoices.length)}–{Math.min(page*pageSize, filteredInvoices.length)} sur {filteredInvoices.length}
               </div>
               <div className="space-x-1">
                 <Button size="sm" variant="outline" onClick={() => setPage(p => Math.max(1, p-1))}>Préc.</Button>
-                <Button size="sm" variant="outline" onClick={() => setPage(p => (p*pageSize < invoices.length ? p+1 : p))}>Suiv.</Button>
+                <Button size="sm" variant="outline" onClick={() => setPage(p => (p*pageSize < filteredInvoices.length ? p+1 : p))}>Suiv.</Button>
               </div>
             </div>
           )}
