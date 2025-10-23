@@ -83,27 +83,45 @@ async function findUserIdForRecipients(addresses: string[]): Promise<string | nu
 export async function POST(request: NextRequest) {
   try {
     const raw = await request.text()
+    const svixId = request.headers.get('svix-id') || ''
+    const svixTimestamp = request.headers.get('svix-timestamp') || ''
+    console.log('[inbound] request received', {
+      svixId,
+      svixTimestamp,
+      contentType: request.headers.get('content-type') || '',
+      length: raw.length
+    })
 
     // Déterminer provider et vérifier auth via Resend (Svix) sinon Postmark
     let provider: 'resend' | 'postmark' | 'unknown' = 'unknown'
     let event: any | null = await verifyResendWebhook(raw, request)
     if (event && event?.type === 'email.received') {
       provider = 'resend'
+      console.log('[inbound] provider detected: resend')
     } else {
       const postmarkOk = await verifyPostmarkAuth(request)
       if (!postmarkOk) {
+        console.warn('[inbound] unauthorized request (failed svix and postmark auth)')
         return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
       }
       provider = 'postmark'
+      console.log('[inbound] provider detected: postmark')
     }
 
     const parsed = event ?? JSON.parse(raw)
     const payload = provider === 'resend' ? parsed.data : parsed
+    console.log('[inbound] event parsed', {
+      type: event?.type || 'postmark',
+      emailId: provider === 'resend' ? parsed?.data?.email_id : undefined
+    })
     const addresses = collectAddressesFromPayload(payload)
     const userId = await findUserIdForRecipients(addresses)
+    console.log('[inbound] recipients resolved', { addresses, userId })
 
     if (!userId) {
-      return NextResponse.json({ error: 'Destinataire invalide (alias ou plus-addressing requis)' }, { status: 400 })
+      // Répondre 200 pour éviter les retries infinis côté Resend
+      console.log('[inbound] ignoring: invalid recipient (no user)')
+      return NextResponse.json({ success: true, ignored: 'destinataire-invalide', provider })
     }
 
     // Collecter les pièces jointes
@@ -117,8 +135,15 @@ export async function POST(request: NextRequest) {
       const listResp = await (resend as any).attachments.receiving.list({ emailId })
       const attachments = listResp?.data || []
       if (!attachments.length) {
-        return NextResponse.json({ error: 'Aucune pièce jointe' }, { status: 400 })
+        console.log('[inbound] no attachments (resend)', { emailId })
+        // Répondre 200 pour éviter les retries si aucun attachement
+        return NextResponse.json({ success: true, ignored: 'aucune-piece-jointe', provider })
       }
+      console.log('[inbound] attachments (resend)', {
+        emailId,
+        count: attachments.length,
+        files: attachments.map((a: any) => a?.filename).filter(Boolean)
+      })
       for (const att of attachments) {
         const contentType = att?.content_type || 'application/octet-stream'
         if (!allowedTypes.has(contentType)) continue
@@ -146,6 +171,7 @@ export async function POST(request: NextRequest) {
         if (insErr) throw insErr
 
         created.push({ fileId: invoice.id, fileName: filename })
+        console.log('[inbound] invoice created (resend)', { invoiceId: invoice.id, filename })
 
         await (supabaseAdmin as any)
           .from('processing_queue')
@@ -158,8 +184,13 @@ export async function POST(request: NextRequest) {
         ? payload.Attachments
         : []
       if (!atts.length) {
-        return NextResponse.json({ error: 'Aucune pièce jointe' }, { status: 400 })
+        console.log('[inbound] no attachments (postmark-like)')
+        return NextResponse.json({ success: true, ignored: 'aucune-piece-jointe', provider })
       }
+      console.log('[inbound] attachments (postmark-like)', {
+        count: atts.length,
+        files: atts.map((a: any) => a?.filename || a?.name || a?.Name).filter(Boolean)
+      })
       for (const att of atts) {
         const contentType = att?.contentType || att?.ContentType || 'application/octet-stream'
         if (!allowedTypes.has(contentType)) continue
@@ -191,6 +222,7 @@ export async function POST(request: NextRequest) {
         if (insErr) throw insErr
 
         created.push({ fileId: invoice.id, fileName: filename })
+        console.log('[inbound] invoice created (postmark-like)', { invoiceId: invoice.id, filename })
 
         await (supabaseAdmin as any)
           .from('processing_queue')
@@ -200,6 +232,7 @@ export async function POST(request: NextRequest) {
 
     try { fetch(`${process.env.NEXT_PUBLIC_APP_URL || ''}/api/queue/worker`).catch(() => {}) } catch {}
 
+    console.log('[inbound] done', { createdCount: created.length, provider })
     return NextResponse.json({ success: true, created, provider })
   } catch (e: any) {
     console.error('Inbound email error:', e)
