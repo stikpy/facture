@@ -2,6 +2,11 @@ import { createServerClient, type CookieOptions } from '@supabase/ssr'
 import { NextResponse, type NextRequest } from 'next/server'
 
 export async function updateSession(request: NextRequest) {
+  // Éviter les 405 sur la racine: répondre 204 pour POST / (bruit de certains navigateurs/extensions)
+  if (request.method === 'POST' && request.nextUrl.pathname === '/') {
+    return new NextResponse(null, { status: 204 })
+  }
+
   let response = NextResponse.next()
 
   const supabase = createServerClient(
