@@ -12,8 +12,17 @@ export async function POST(request: NextRequest) {
     const addr = String(full_address || '').trim().toLowerCase()
     if (!addr.includes('@')) return NextResponse.json({ error: 'Adresse invalide' }, { status: 400 })
 
-    const orgId = (user as any)?.user_metadata?.organization_id
-    if (!orgId) return NextResponse.json({ error: 'Aucune organisation active' }, { status: 400 })
+    let orgId = (user as any)?.user_metadata?.organization_id as string | null
+    if (!orgId) {
+      // Fallback: prendre la première organisation où l'utilisateur est membre
+      const { data: memberships } = await (supabaseAdmin as any)
+        .from('organization_members')
+        .select('organization_id, created_at')
+        .eq('user_id', user.id)
+        .order('created_at', { ascending: true })
+      orgId = (memberships?.[0]?.organization_id as string) || null
+    }
+    if (!orgId) return NextResponse.json({ error: 'Aucune organisation active (définissez-en une ou activez-en une)' }, { status: 400 })
 
     const { error: upErr } = await (supabaseAdmin as any)
       .from('inbound_addresses')
@@ -32,7 +41,15 @@ export async function GET(request: NextRequest) {
     const { data: { user }, error } = await supabase.auth.getUser()
     if (error || !user) return NextResponse.json({ error: 'Non authentifié' }, { status: 401 })
 
-    const orgId = (user as any)?.user_metadata?.organization_id
+    let orgId = (user as any)?.user_metadata?.organization_id as string | null
+    if (!orgId) {
+      const { data: memberships } = await (supabaseAdmin as any)
+        .from('organization_members')
+        .select('organization_id, created_at')
+        .eq('user_id', user.id)
+        .order('created_at', { ascending: true })
+      orgId = (memberships?.[0]?.organization_id as string) || null
+    }
     if (!orgId) return NextResponse.json({ entries: [] })
 
     const { data } = await (supabaseAdmin as any)
@@ -57,7 +74,15 @@ export async function DELETE(request: NextRequest) {
     const addr = String(searchParams.get('full_address') || '').toLowerCase()
     if (!addr) return NextResponse.json({ error: 'Adresse requise' }, { status: 400 })
 
-    const orgId = (user as any)?.user_metadata?.organization_id
+    let orgId = (user as any)?.user_metadata?.organization_id as string | null
+    if (!orgId) {
+      const { data: memberships } = await (supabaseAdmin as any)
+        .from('organization_members')
+        .select('organization_id, created_at')
+        .eq('user_id', user.id)
+        .order('created_at', { ascending: true })
+      orgId = (memberships?.[0]?.organization_id as string) || null
+    }
     if (!orgId) return NextResponse.json({ error: 'Aucune organisation active' }, { status: 400 })
 
     const { error: delErr } = await (supabaseAdmin as any)
