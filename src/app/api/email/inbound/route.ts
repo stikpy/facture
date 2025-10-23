@@ -175,12 +175,32 @@ export async function POST(request: NextRequest) {
     const created: { fileId: string; fileName: string }[] = []
 
     if (provider === 'resend') {
-      const resend = new Resend(process.env.RESEND_API_KEY || '')
+      const resendApiKey = process.env.RESEND_API_KEY || ''
+      const resend = new Resend(resendApiKey)
       const emailId = parsed.data?.email_id
-      const listResp = await (resend as any).attachments.receiving.list({ emailId })
-      const attachments = listResp?.data || []
+      console.log('[inbound] fetching attachments (resend)', { emailId, hasApiKey: Boolean(resendApiKey) })
+
+      // Retry simple pour gérer l'éventuelle latence d'indexation côté Resend
+      async function sleep(ms: number) { return new Promise((r) => setTimeout(r, ms)) }
+      let attachments: any[] = []
+      const maxAttempts = 4
+      for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+        try {
+          const listResp = await (resend as any).attachments.receiving.list({ emailId })
+          attachments = listResp?.data || []
+          if (attachments.length > 0) {
+            break
+          }
+        } catch (err) {
+          console.warn('[inbound] attachments.list error', { attempt, error: (err as Error)?.message })
+        }
+        if (attempt < maxAttempts) {
+          await sleep(500 * attempt) // backoff
+        }
+      }
+
       if (!attachments.length) {
-        console.log('[inbound] no attachments (resend)', { emailId })
+        console.log('[inbound] no attachments (resend) after retries', { emailId, attempts: maxAttempts })
         // Répondre 200 pour éviter les retries si aucun attachement
         return NextResponse.json({ success: true, ignored: 'aucune-piece-jointe', provider })
       }
