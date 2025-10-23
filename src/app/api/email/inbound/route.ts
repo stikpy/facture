@@ -169,8 +169,9 @@ export async function POST(request: NextRequest) {
     console.log('[inbound] recipients resolved', { addresses, organizationId, userId, senderEmail, senderOk })
     console.log('[inbound] timing.resolveRecipients.ms', Date.now() - tResolveStart)
 
-    if (organizationId && !senderOk) {
-      console.warn('[inbound] ignoring: sender not allowed for org', { organizationId, senderEmail })
+    const enforceAllowlist = String(process.env.INBOUND_ENFORCE_SENDER_ALLOWLIST || '').toLowerCase() === 'true'
+    if (organizationId && enforceAllowlist && !senderOk) {
+      console.warn('[inbound] ignoring: sender not allowed for org (allowlist enforced)', { organizationId, senderEmail })
       return NextResponse.json({ success: true, ignored: 'expediteur-non-autorise', organizationId, provider })
     }
 
