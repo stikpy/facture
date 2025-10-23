@@ -1,31 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
 import { StorageService } from '@/lib/storage'
-
-function timingSafeEqual(a: string, b: string) {
-  if (a.length !== b.length) return false
-  let result = 0
-  for (let i = 0; i < a.length; i++) result |= a.charCodeAt(i) ^ b.charCodeAt(i)
-  return result === 0
-}
-
-async function verifyResendSignature(req: NextRequest, rawBody: string) {
-  const secret = process.env.RESEND_INBOUND_SECRET
-  if (!secret) return false
-  const header = req.headers.get('x-resend-signature') || req.headers.get('resend-signature')
-  if (!header) return false
-  const encoder = new TextEncoder()
-  const key = await crypto.subtle.importKey(
-    'raw',
-    encoder.encode(secret),
-    { name: 'HMAC', hash: 'SHA-256' },
-    false,
-    ['sign']
-  )
-  const signature = await crypto.subtle.sign('HMAC', key, encoder.encode(rawBody))
-  const expected = Buffer.from(signature).toString('hex')
-  return timingSafeEqual(expected, header)
-}
+import { Resend } from 'resend'
 
 function parseBasicAuth(authHeader: string | null) {
   if (!authHeader?.startsWith('Basic ')) return null
@@ -48,6 +24,25 @@ async function verifyPostmarkAuth(req: NextRequest) {
   const url = new URL(req.url)
   if (t && url.searchParams.get('token') === t) return true
   return false
+}
+
+async function verifyResendWebhook(rawBody: string, req: NextRequest) {
+  const webhookSecret = process.env.RESEND_WEBHOOK_SECRET
+  if (!webhookSecret) return null
+  const svixId = req.headers.get('svix-id') || ''
+  const svixTimestamp = req.headers.get('svix-timestamp') || ''
+  const svixSignature = req.headers.get('svix-signature') || ''
+  try {
+    const resend = new Resend(process.env.RESEND_API_KEY || '')
+    const event = await (resend as any).webhooks.verify({
+      payload: rawBody,
+      headers: { id: svixId, timestamp: svixTimestamp, signature: svixSignature },
+      webhookSecret
+    })
+    return event
+  } catch {
+    return null
+  }
 }
 
 function collectAddressesFromPayload(payload: any): string[] {
@@ -89,18 +84,21 @@ export async function POST(request: NextRequest) {
   try {
     const raw = await request.text()
 
-    // Déterminer provider et vérifier auth
-    let provider: 'resend' | 'postmark' = 'resend'
-    let allowed = await verifyResendSignature(request, raw)
-    if (!allowed) {
+    // Déterminer provider et vérifier auth via Resend (Svix) sinon Postmark
+    let provider: 'resend' | 'postmark' | 'unknown' = 'unknown'
+    let event: any | null = await verifyResendWebhook(raw, request)
+    if (event && event?.type === 'email.received') {
+      provider = 'resend'
+    } else {
+      const postmarkOk = await verifyPostmarkAuth(request)
+      if (!postmarkOk) {
+        return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+      }
       provider = 'postmark'
-      allowed = await verifyPostmarkAuth(request)
-    }
-    if (!allowed) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
-    const payload = JSON.parse(raw)
+    const parsed = event ?? JSON.parse(raw)
+    const payload = provider === 'resend' ? parsed.data : parsed
     const addresses = collectAddressesFromPayload(payload)
     const userId = await findUserIdForRecipients(addresses)
 
@@ -109,57 +107,95 @@ export async function POST(request: NextRequest) {
     }
 
     // Collecter les pièces jointes
-    const atts: any[] = Array.isArray(payload?.attachments)
-      ? payload.attachments
-      : Array.isArray(payload?.Attachments)
-      ? payload.Attachments
-      : []
-
-    if (!atts.length) {
-      return NextResponse.json({ error: 'Aucune pièce jointe' }, { status: 400 })
-    }
-
     const allowedTypes = new Set(['application/pdf', 'image/jpeg', 'image/png', 'image/tiff'])
-
     const storage = new StorageService()
     const created: { fileId: string; fileName: string }[] = []
 
-    for (const att of atts) {
-      const contentType = att?.contentType || att?.ContentType || 'application/octet-stream'
-      if (!allowedTypes.has(contentType)) continue
-      const filename = att?.filename || att?.name || att?.Name || 'attachment'
-
-      let buffer: Buffer | null = null
-      const b64 = att?.content || att?.Content
-      const url = att?.downloadUrl || att?.url
-      if (b64) buffer = Buffer.from(b64, 'base64')
-      else if (url) {
-        const res = await fetch(url)
-        buffer = Buffer.from(await res.arrayBuffer())
+    if (provider === 'resend') {
+      const resend = new Resend(process.env.RESEND_API_KEY || '')
+      const emailId = parsed.data?.email_id
+      const listResp = await (resend as any).attachments.receiving.list({ emailId })
+      const attachments = listResp?.data || []
+      if (!attachments.length) {
+        return NextResponse.json({ error: 'Aucune pièce jointe' }, { status: 400 })
       }
-      if (!buffer) continue
+      for (const att of attachments) {
+        const contentType = att?.content_type || 'application/octet-stream'
+        if (!allowedTypes.has(contentType)) continue
+        const filename = att?.filename || 'attachment'
+        const downloadUrl = att?.download_url
+        if (!downloadUrl) continue
+        const response = await fetch(downloadUrl)
+        if (!response.ok) continue
+        const buffer = Buffer.from(await response.arrayBuffer())
 
-      const { path } = await storage.uploadFile(buffer, filename, contentType, userId)
+        const { path } = await storage.uploadFile(buffer, filename, contentType, userId)
 
-      const { data: invoice, error: insErr } = await (supabaseAdmin as any)
-        .from('invoices')
-        .insert({
-          user_id: userId,
-          file_name: filename,
-          file_path: path,
-          file_size: buffer.length,
-          mime_type: contentType,
-          status: 'pending'
-        } as any)
-        .select()
-        .single()
-      if (insErr) throw insErr
+        const { data: invoice, error: insErr } = await (supabaseAdmin as any)
+          .from('invoices')
+          .insert({
+            user_id: userId,
+            file_name: filename,
+            file_path: path,
+            file_size: buffer.length,
+            mime_type: contentType,
+            status: 'pending'
+          } as any)
+          .select()
+          .single()
+        if (insErr) throw insErr
 
-      created.push({ fileId: invoice.id, fileName: filename })
+        created.push({ fileId: invoice.id, fileName: filename })
 
-      await (supabaseAdmin as any)
-        .from('processing_queue')
-        .insert({ invoice_id: invoice.id, user_id: userId, status: 'pending' } as any)
+        await (supabaseAdmin as any)
+          .from('processing_queue')
+          .insert({ invoice_id: invoice.id, user_id: userId, status: 'pending' } as any)
+      }
+    } else {
+      const atts: any[] = Array.isArray(payload?.attachments)
+        ? payload.attachments
+        : Array.isArray(payload?.Attachments)
+        ? payload.Attachments
+        : []
+      if (!atts.length) {
+        return NextResponse.json({ error: 'Aucune pièce jointe' }, { status: 400 })
+      }
+      for (const att of atts) {
+        const contentType = att?.contentType || att?.ContentType || 'application/octet-stream'
+        if (!allowedTypes.has(contentType)) continue
+        const filename = att?.filename || att?.name || att?.Name || 'attachment'
+        let buffer: Buffer | null = null
+        const b64 = att?.content || att?.Content
+        const url = att?.downloadUrl || att?.url
+        if (b64) buffer = Buffer.from(b64, 'base64')
+        else if (url) {
+          const res = await fetch(url)
+          buffer = Buffer.from(await res.arrayBuffer())
+        }
+        if (!buffer) continue
+
+        const { path } = await storage.uploadFile(buffer, filename, contentType, userId)
+
+        const { data: invoice, error: insErr } = await (supabaseAdmin as any)
+          .from('invoices')
+          .insert({
+            user_id: userId,
+            file_name: filename,
+            file_path: path,
+            file_size: buffer.length,
+            mime_type: contentType,
+            status: 'pending'
+          } as any)
+          .select()
+          .single()
+        if (insErr) throw insErr
+
+        created.push({ fileId: invoice.id, fileName: filename })
+
+        await (supabaseAdmin as any)
+          .from('processing_queue')
+          .insert({ invoice_id: invoice.id, user_id: userId, status: 'pending' } as any)
+      }
     }
 
     try { fetch(`${process.env.NEXT_PUBLIC_APP_URL || ''}/api/queue/worker`).catch(() => {}) } catch {}

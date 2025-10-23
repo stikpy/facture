@@ -40,6 +40,7 @@
     "react-dom": "^19.0.0",
     "react-dropzone": "^14.3.5",
     "recharts": "^2.13.3",
+    "resend": "^6.3.0-canary.3",
     "sharp": "^0.33.5",
     "tailwind-merge": "^2.5.4",
     "tailwindcss-animate": "^1.0.7",
