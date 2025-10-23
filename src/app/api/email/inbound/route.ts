@@ -309,7 +309,13 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    try { fetch(`${process.env.NEXT_PUBLIC_APP_URL || ''}/api/queue/worker`).catch(() => {}) } catch {}
+    try {
+      const origin = (() => {
+        try { return new URL(request.url).origin } catch { return process.env.NEXT_PUBLIC_APP_URL || '' }
+      })()
+      console.log('[inbound] trigger worker', { origin })
+      fetch(`${origin}/api/queue/worker`, { cache: 'no-store' }).catch(() => {})
+    } catch {}
 
     console.log('[inbound] done', { createdCount: created.length, provider })
     return NextResponse.json({ success: true, created, provider })
