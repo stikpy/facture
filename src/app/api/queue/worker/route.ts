@@ -134,6 +134,27 @@ export async function GET(request: NextRequest) {
       if (headerHints.headerDate || headerHints.headerNumber) {
         console.log('[WORKER] Header hints from FACTURE:', headerHints)
       }
+
+      // Heuristique fournisseur depuis l'en-tête (zone top document)
+      const parseSupplierFromHeader = (txt: string): string | null => {
+        try {
+          const rawLines = String(txt || '').split(/\r?\n/).map(l => l.trim()).filter(Boolean)
+          const top = rawLines.slice(0, 40)
+          const banned = /(facture|facturation|client|destinataire|livraison|n°|code client|siret|tva|iban|email|tél|adresse)/i
+          const candidates = top
+            .filter(l => l.length >= 4 && !banned.test(l))
+            .map(l => l.replace(/\s{2,}/g, ' ').trim())
+          // Favoriser les lignes en MAJUSCULES avec lettres
+          let best: string | null = null
+          for (const l of candidates) {
+            const hasLetters = /[A-Za-zÀ-ÿ]/.test(l)
+            const isUpperish = l === l.toUpperCase()
+            if (hasLetters && isUpperish) { best = l; break }
+          }
+          return best || null
+        } catch { return null }
+      }
+      const supplierHeaderCandidate = parseSupplierFromHeader(extractedText)
       if (!extractedText.trim()) {
         console.warn('[WORKER] PDF scanné sans texte - marquage pour OCR manuel')
         // Marquer comme "needs_manual_ocr" au lieu de throw
@@ -188,6 +209,20 @@ export async function GET(request: NextRequest) {
           console.log('[WORKER] Set invoice_number from header FACTURE', { fromHeader: headerHints.headerNumber })
         }
         extractedData = ed
+      } catch {}
+
+      // Post-correction: si un nom fournisseur fiable est trouvé en tête, le privilégier
+      try {
+        const ed: any = extractedData || {}
+        if (supplierHeaderCandidate) {
+          const clientNorm = String(ed.client_name || '').toLowerCase().trim()
+          const candNorm = supplierHeaderCandidate.toLowerCase().trim()
+          if (!clientNorm || candNorm !== clientNorm) {
+            console.log('[WORKER] Override supplier_name from header top block', { old: ed.supplier_name, fromHeader: supplierHeaderCandidate })
+            ed.supplier_name = supplierHeaderCandidate
+            extractedData = ed
+          }
+        }
       } catch {}
       
       // POST-VALIDATION: Vérifier que fournisseur ≠ client

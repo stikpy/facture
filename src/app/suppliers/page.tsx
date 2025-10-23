@@ -771,10 +771,13 @@ export default function SuppliersPage() {
 
             {/* Body */}
             <div className="p-6 space-y-6">
-              {/* Nom du fournisseur */}
+              {/* Nom du fournisseur (éditable) */}
               <div className="bg-gradient-to-r from-blue-50 to-indigo-50 border-2 border-blue-200 rounded-lg p-4">
                 <label className="block text-sm font-semibold text-gray-700 mb-2">Nom du fournisseur</label>
-                <div className="text-2xl font-bold text-gray-900">{validationModal.supplier.display_name}</div>
+                <Input
+                  value={validationModal.supplier.display_name}
+                  onChange={(e)=> setValidationModal(v => v.supplier ? ({...v, supplier: { ...v.supplier, display_name: e.target.value, name: e.target.value }}) : v)}
+                />
                 <div className="text-sm text-gray-600 mt-1">Code: {validationModal.supplier.code}</div>
               </div>
 
@@ -910,6 +913,12 @@ export default function SuppliersPage() {
                       vat_number: validationModal.supplierInfo?.vat_number || undefined,
                       siret: validationModal.supplierInfo?.siret || undefined,
                     })
+                    // Mettre à jour le nom directement si changé
+                    const newName = validationModal.supplier.display_name
+                    if (newName) {
+                      const supabase = createClient()
+                      ;(supabase as any).from('suppliers').update({ display_name: newName, name: newName } as any).eq('id', validationModal.supplier.id)
+                    }
                     setValidationModal({ isOpen: false, supplier: null, supplierInfo: null })
                   }
                 }}
