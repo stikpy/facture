@@ -91,7 +91,9 @@ export class DocumentProcessor {
            - Sous les mentions: "Facturé à:", "Client:", "Destinataire:", "Livré à:"
            - C'est l'entreprise qui doit PAYER
         
-        3. VÉRIFICATIONS:
+        3. DATES: La date de FACTURE est celle indiquée dans l'en-tête "FACTURE" (cadre contenant "Date | N° | Code Client"). Ne JAMAIS prendre la date du bon de livraison ou de commande.
+
+        4. VÉRIFICATIONS:
            - Si supplier_name = client_name → ERREUR! Relisez attentivement le document
            - Le nom du fichier peut contenir un indice sur le fournisseur
            - Cherchez les RIB/IBAN → ils appartiennent au FOURNISSEUR (qui reçoit le paiement)

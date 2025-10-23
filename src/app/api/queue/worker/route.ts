@@ -79,6 +79,31 @@ export async function GET(request: NextRequest) {
       let extractedText = ''
       let pageTexts: string[] = []
       let alternativeTexts: Array<{rotation: number, score: number, text: string}> = []
+      
+      // Heuristique: extraire depuis l'en-tête FACTURE la vraie date/numéro de facture
+      const parseHeaderFromText = (txt: string): { headerDate?: string, headerNumber?: string } => {
+        try {
+          const s = String(txt || '')
+          // Chercher bloc proche du mot FACTURE avec champs Date / N° (ordre variable)
+          const headerRegex = /FACTURE[\s\S]{0,300}?(?:Date\s*:?\s*(\d{1,2}\/\d{1,2}\/\d{2,4}).*?N[°º]?\s*:?\s*([A-Za-z0-9\-]+)|N[°º]?\s*:?\s*([A-Za-z0-9\-]+).*?Date\s*:?\s*(\d{1,2}\/\d{1,2}\/\d{2,4}))/i
+          const m = s.match(headerRegex)
+          if (!m) return {}
+          let dateStr = m[1] || m[4]
+          let numStr = m[2] || m[3]
+          const toIso = (d: string) => {
+            const [dd, mm, yy] = d.split('/')
+            let yyyy = yy
+            if (yy.length === 2) {
+              const n = parseInt(yy, 10)
+              yyyy = (n >= 70 ? 1900 + n : 2000 + n).toString()
+            }
+            return `${yyyy.padStart(4,'0')}-${mm.padStart(2,'0')}-${dd.padStart(2,'0')}`
+          }
+          const headerDate = dateStr ? toIso(dateStr) : undefined
+          const headerNumber = numStr || undefined
+          return { headerDate, headerNumber }
+        } catch { return {} }
+      }
 
       // Extraction de texte selon le type
       if ((invoice as any).mime_type === 'application/pdf') {
@@ -105,6 +130,10 @@ export async function GET(request: NextRequest) {
       }
 
       console.log('[WORKER] Taille texte extrait:', extractedText?.length, '|', time())
+      const headerHints = parseHeaderFromText(extractedText)
+      if (headerHints.headerDate || headerHints.headerNumber) {
+        console.log('[WORKER] Header hints from FACTURE:', headerHints)
+      }
       if (!extractedText.trim()) {
         console.warn('[WORKER] PDF scanné sans texte - marquage pour OCR manuel')
         // Marquer comme "needs_manual_ocr" au lieu de throw
@@ -140,6 +169,26 @@ export async function GET(request: NextRequest) {
       const tAiStart = Date.now()
       let extractedData = await documentProcessor.processDocument(extractedText, (invoice as any).file_name)
       console.log('[WORKER] IA extraction done in', Date.now() - tAiStart, 'ms')
+
+      // Post-correction: si la date/numéro de l'en-tête FACTURE est trouvée, les privilégier
+      try {
+        const ed: any = extractedData || {}
+        if (headerHints.headerDate && ed.invoice_date && ed.invoice_date !== headerHints.headerDate) {
+          console.log('[WORKER] Override invoice_date from header FACTURE', { old: ed.invoice_date, fromHeader: headerHints.headerDate })
+          ed.invoice_date = headerHints.headerDate
+        } else if (headerHints.headerDate && !ed.invoice_date) {
+          ed.invoice_date = headerHints.headerDate
+          console.log('[WORKER] Set invoice_date from header FACTURE', { fromHeader: headerHints.headerDate })
+        }
+        if (headerHints.headerNumber && ed.invoice_number && String(ed.invoice_number) !== String(headerHints.headerNumber)) {
+          console.log('[WORKER] Override invoice_number from header FACTURE', { old: ed.invoice_number, fromHeader: headerHints.headerNumber })
+          ed.invoice_number = headerHints.headerNumber
+        } else if (headerHints.headerNumber && !ed.invoice_number) {
+          ed.invoice_number = headerHints.headerNumber
+          console.log('[WORKER] Set invoice_number from header FACTURE', { fromHeader: headerHints.headerNumber })
+        }
+        extractedData = ed
+      } catch {}
       
       // POST-VALIDATION: Vérifier que fournisseur ≠ client
       if ((extractedData as any)?.supplier_name && (extractedData as any)?.client_name) {
