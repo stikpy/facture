@@ -110,7 +110,7 @@ export async function POST(request: NextRequest) {
       const documentProcessor = new DocumentProcessor()
       const extractedData = await documentProcessor.processDocument(extractedText, fileName)
       console.log('✅ [SERVER] Données extraites par l\'IA:', extractedData)
-      
+
       // POST-VALIDATION: Vérifier que fournisseur ≠ client
       if ((extractedData as any)?.supplier_name && (extractedData as any)?.client_name) {
         const supplierNorm = String((extractedData as any).supplier_name).toLowerCase().trim()
@@ -134,7 +134,49 @@ export async function POST(request: NextRequest) {
           }
         }
       }
-      
+
+      const normalizeString = (value: unknown): string | null => {
+        if (!value) return null
+        const str = String(value).trim()
+        return str.length > 0 ? str : null
+      }
+
+      const cleanList = (values?: string[]) => (values || [])
+        .map(item => normalizeString(item))
+        .filter((val): val is string => Boolean(val))
+
+      const allowedDocumentTypes = new Set(['invoice', 'delivery_note', 'credit_note', 'quote', 'other'])
+
+      let documentType = normalizeString((extractedData as any)?.document_type)?.toLowerCase() || 'invoice'
+      if (!allowedDocumentTypes.has(documentType)) {
+        documentType = 'invoice'
+      }
+
+      const deliveryNoteNumber = normalizeString((extractedData as any)?.delivery_note_number)
+      const relatedDeliveryNotes = cleanList(extractedData.related_delivery_note_numbers)
+      const relatedInvoiceNumbers = cleanList(extractedData.related_invoice_numbers)
+      const normalizedInvoiceNumber = normalizeString((extractedData as any)?.invoice_number)
+
+      let documentReference = normalizeString((extractedData as any)?.document_reference)
+      if (!documentReference) {
+        if (documentType === 'delivery_note') {
+          documentReference = deliveryNoteNumber || normalizedInvoiceNumber || null
+        } else {
+          documentReference = normalizedInvoiceNumber || deliveryNoteNumber || null
+        }
+      }
+
+      if (documentReference) {
+        documentReference = documentReference.replace(/\s+/g, ' ')
+      }
+
+      ;(extractedData as any).invoice_number = normalizedInvoiceNumber || undefined
+      ;(extractedData as any).document_type = documentType
+      ;(extractedData as any).document_reference = documentReference || undefined
+      ;(extractedData as any).delivery_note_number = deliveryNoteNumber || undefined
+      ;(extractedData as any).related_delivery_note_numbers = relatedDeliveryNotes
+      ;(extractedData as any).related_invoice_numbers = relatedInvoiceNumbers
+
       const classification = await documentProcessor.classifyInvoice(extractedData)
       console.log('✅ [SERVER] Classification:', classification)
 
@@ -156,6 +198,80 @@ export async function POST(request: NextRequest) {
         console.error('❌ [SERVER] Erreur lors de l\'upsert du fournisseur:', e)
       }
 
+      const existingPairedId: string | null = (invoice as any).paired_document_id || null
+      let pairedDocumentId: string | null = null
+      let matchedDocumentPair: string | null = null
+      let shouldUpdatePeer = false
+
+      const organizationId = (invoice as any).organization_id
+
+      if (organizationId) {
+        if (documentType === 'invoice') {
+          const candidateSet = new Set<string>()
+          for (const ref of relatedDeliveryNotes) {
+            candidateSet.add(ref)
+          }
+          if (deliveryNoteNumber) {
+            candidateSet.add(deliveryNoteNumber)
+          }
+          const candidateNumbers = Array.from(candidateSet)
+
+          if (candidateNumbers.length > 0) {
+            const { data: matches, error: matchError } = await (supabaseAdmin as any)
+              .from('invoices')
+              .select('id, paired_document_id, document_reference')
+              .eq('organization_id', organizationId)
+              .eq('document_type', 'delivery_note')
+              .in('document_reference', candidateNumbers)
+            if (matchError) {
+              console.error('❌ [SERVER] Erreur lors de la recherche de bon de livraison lié:', matchError)
+            } else if (matches && matches.length > 0) {
+              const match = matches.find((m: any) => !m.paired_document_id || m.paired_document_id === fileId)
+              if (match) {
+                pairedDocumentId = match.id
+                matchedDocumentPair = match.paired_document_id
+                shouldUpdatePeer = existingPairedId !== match.id
+              }
+            }
+          }
+        } else if (documentType === 'delivery_note') {
+          const candidateSet = new Set<string>()
+          if (documentReference) {
+            candidateSet.add(documentReference)
+          }
+          for (const ref of relatedInvoiceNumbers) {
+            candidateSet.add(ref)
+          }
+          if (normalizedInvoiceNumber) {
+            candidateSet.add(normalizedInvoiceNumber)
+          }
+          const candidateNumbers = Array.from(candidateSet)
+
+          if (candidateNumbers.length > 0) {
+            const { data: matches, error: matchError } = await (supabaseAdmin as any)
+              .from('invoices')
+              .select('id, paired_document_id, document_reference, extracted_data')
+              .eq('organization_id', organizationId)
+              .eq('document_type', 'invoice')
+              .in('document_reference', candidateNumbers)
+            if (matchError) {
+              console.error('❌ [SERVER] Erreur lors de la recherche de facture liée:', matchError)
+            } else if (matches && matches.length > 0) {
+              const match = matches.find((m: any) => !m.paired_document_id || m.paired_document_id === fileId)
+              if (match) {
+                pairedDocumentId = match.id
+                matchedDocumentPair = match.paired_document_id
+                shouldUpdatePeer = existingPairedId !== match.id
+              }
+            }
+          }
+        }
+      }
+
+      if (!pairedDocumentId) {
+        pairedDocumentId = existingPairedId
+      }
+
       // Sauvegarder les données extraites
       console.log('💾 [SERVER] Sauvegarde des données extraites en base')
       const { error: updateError } = await (supabaseAdmin as any)
@@ -163,7 +279,10 @@ export async function POST(request: NextRequest) {
         .update({
           extracted_data: extractedData,
           classification: classification.category,
-          status: 'completed'
+          status: 'completed',
+          document_type: documentType,
+          document_reference: documentReference,
+          paired_document_id: pairedDocumentId ?? null
         } as any)
         .eq('id', fileId)
 
@@ -172,6 +291,14 @@ export async function POST(request: NextRequest) {
         throw updateError
       }
       console.log('✅ [SERVER] Données sauvegardées avec succès')
+
+      if (shouldUpdatePeer && pairedDocumentId && (!matchedDocumentPair || matchedDocumentPair === fileId)) {
+        await (supabaseAdmin as any)
+          .from('invoices')
+          .update({ paired_document_id: fileId } as any)
+          .eq('id', pairedDocumentId)
+        console.log(`🔗 [SERVER] Rapprochement établi avec le document ${pairedDocumentId}`)
+      }
 
       // Créer les articles de facture si disponibles
       if (extractedData.items && extractedData.items.length > 0) {

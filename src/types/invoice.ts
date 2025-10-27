@@ -6,7 +6,12 @@ export interface ExtractedInvoiceData {
   total_amount?: number
   tax_amount?: number
   subtotal?: number
-  
+  document_type?: 'invoice' | 'delivery_note' | 'credit_note' | 'quote' | 'other'
+  document_reference?: string
+  delivery_note_number?: string
+  related_delivery_note_numbers?: string[]
+  related_invoice_numbers?: string[]
+
   // Informations fournisseur
   supplier_name?: string
   supplier_address?: string

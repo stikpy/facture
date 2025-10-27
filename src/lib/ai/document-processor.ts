@@ -29,6 +29,17 @@ export class DocumentProcessor {
 
   async processDocument(text: string, fileName: string): Promise<ExtractedInvoiceData> {
     try {
+      const normalizeList = (value: unknown): string[] => {
+        if (!value) return []
+        if (Array.isArray(value)) return value.map(v => String(v).trim()).filter(Boolean)
+        const raw = String(value)
+        if (!raw.trim()) return []
+        return raw
+          .split(/[,;\n]+/)
+          .map(part => part.trim())
+          .filter(Boolean)
+      }
+
       const sanitizeToJson = (raw: any): any => {
         // Normaliser la sortie du modèle vers une chaîne
         let s = typeof raw === 'string'
@@ -75,11 +86,11 @@ export class DocumentProcessor {
       
       // Template pour l'extraction de données
       const prompt = ChatPromptTemplate.fromTemplate(`
-        Vous êtes un expert en extraction de données de factures. 
+        Vous êtes un expert en extraction de documents comptables (factures, bons de livraison, avoirs...).
         Analysez le texte suivant et extrayez toutes les informations pertinentes.
-        
+
         RÈGLES CRITIQUES D'IDENTIFICATION (À RESPECTER ABSOLUMENT):
-        
+
         1. FOURNISSEUR (supplier) = Entreprise qui VEND et ENVOIE la facture
            - Apparaît TOUJOURS en haut du document (zone "émetteur")
            - Son SIRET/SIREN/TVA est en HAUT de la facture
@@ -93,14 +104,27 @@ export class DocumentProcessor {
         
         3. DATES: La date de FACTURE est celle indiquée dans l'en-tête "FACTURE" (cadre contenant "Date | N° | Code Client"). Ne JAMAIS prendre la date du bon de livraison ou de commande.
 
-        4. VÉRIFICATIONS:
+        4. TYPE DE DOCUMENT (document_type):
+           - "invoice" : mentions "FACTURE" ou "FACTURE N°" clairement, contient montants HT/TVA/total.
+           - "delivery_note" : mentions "BON DE LIVRAISON", "BL", "BON N°", avec détails de livraison et souvent signature.
+           - "credit_note" : mentions "AVOIR" ou "NOTE DE CREDIT".
+           - "quote" : mentions "DEVIS" ou "PROPOSITION".
+           - "other" : tout autre document.
+           Utilisez exactement ces valeurs en minuscules.
+
+        5. VÉRIFICATIONS:
            - Si supplier_name = client_name → ERREUR! Relisez attentivement le document
            - Le nom du fichier peut contenir un indice sur le fournisseur
            - Cherchez les RIB/IBAN → ils appartiennent au FOURNISSEUR (qui reçoit le paiement)
            - Si incertain pour l'adresse/TVA du fournisseur, LAISSEZ CES CHAMPS VIDES
-        
+
+        6. RAPPROCHEMENT FACTURE / BON DE LIVRAISON:
+           - Identifiez tous les numéros de bon de livraison associés à la facture (souvent "Bon de livraison", "BL", "Bon n°").
+           - Identifiez tous les numéros de facture associés à un bon de livraison.
+           - Conservez l'ordre et la casse originale des références, mais supprimez les espaces inutiles.
+
         Contexte: {context}
-        
+
         Extrayez les informations suivantes au format JSON:
         {{
           "invoice_number": "numéro de facture",
@@ -109,6 +133,11 @@ export class DocumentProcessor {
           "total_amount": montant_total_numerique,
           "tax_amount": montant_tva_numerique,
           "subtotal": sous_total_numerique,
+          "document_type": "invoice|delivery_note|credit_note|quote|other",
+          "document_reference": "référence principale du document (numéro de facture, BL, avoir, etc.)",
+          "delivery_note_number": "numéro du bon de livraison si présent",
+          "related_delivery_note_numbers": ["liste des numéros de bons de livraison associés"],
+          "related_invoice_numbers": ["liste des numéros de factures associées"],
           "supplier_name": "nom EXACT et COMPLET du fournisseur (ZONE ÉMETTEUR en haut du document)",
           "supplier_address": "adresse complète du fournisseur (laisser vide si incertain)",
           "supplier_email": "email du fournisseur",
@@ -132,7 +161,7 @@ export class DocumentProcessor {
           "payment_terms": "conditions de paiement",
           "notes": "notes additionnelles"
         }}
-        
+
         ⚠️ VALIDATION FINALE: Vérifiez que supplier_name ≠ client_name avant de répondre!
         Répondez uniquement avec le JSON valide, sans texte supplémentaire.
       `)
@@ -146,16 +175,26 @@ export class DocumentProcessor {
         combineDocsChain: documentChain,
         retriever,
       })
-      
+
       const result = await retrievalChain.invoke({
         input: `Extrayez toutes les données de cette facture: ${fileName}`,
       })
-      
+
       // Parser le JSON retourné (tolérant aux fences et au texte annexe)
       const extractedData = sanitizeToJson(result) as ExtractedInvoiceData
-      
-      return extractedData
-      
+
+      const normalizedData: ExtractedInvoiceData = {
+        ...extractedData,
+        related_delivery_note_numbers: normalizeList((extractedData as any)?.related_delivery_note_numbers),
+        related_invoice_numbers: normalizeList((extractedData as any)?.related_invoice_numbers),
+      }
+
+      if (!normalizedData.document_type) {
+        normalizedData.document_type = 'invoice'
+      }
+
+      return normalizedData
+
     } catch (error) {
       console.error('Erreur lors du traitement du document:', error)
       throw new Error('Impossible de traiter le document')

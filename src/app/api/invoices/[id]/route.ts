@@ -76,9 +76,19 @@ export async function GET(
       supplier = supplierData
     }
 
-    return NextResponse.json({ 
-      invoice: { ...(invoice as any), supplier }, 
-      allocations 
+    let pairedDocument = null
+    if ((invoice as any).paired_document_id) {
+      const { data: pair } = await supabaseAdmin
+        .from('invoices')
+        .select('id, file_name, document_type, document_reference, extracted_data, created_at')
+        .eq('id', (invoice as any).paired_document_id)
+        .single()
+      pairedDocument = pair
+    }
+
+    return NextResponse.json({
+      invoice: { ...(invoice as any), supplier, paired_document: pairedDocument },
+      allocations
     })
   } catch (e: any) {
     return NextResponse.json({ error: e.message || 'Erreur serveur' }, { status: 500 })
