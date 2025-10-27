@@ -2,11 +2,69 @@
 
 import { useEffect, useState } from 'react'
 import { useParams, useRouter } from 'next/navigation'
+import Link from 'next/link'
 import { createClient } from '@/utils/supabase/client'
 import { Button } from '@/components/ui/button'
 import Input from '../../../components/ui/input'
 import { LoadingSpinner } from '@/components/ui/loading-spinner'
 import { HOTEL_RESTAURANT_ACCOUNTS, suggestAccountForSupplier, searchAccounts, searchVat, suggestVatForRate, findVatByCode, VAT_PRESETS } from '@/lib/accounting-presets'
+import { FileText, Package, RotateCcw, FilePenLine, FileQuestion, Hash, Link2, type LucideIcon } from 'lucide-react'
+
+type DocumentTypeKey = 'invoice' | 'delivery_note' | 'credit_note' | 'quote' | 'other'
+
+interface DocumentTypeMeta {
+  key: DocumentTypeKey
+  label: string
+  description: string
+  icon: LucideIcon
+  badge: string
+}
+
+const getDocumentTypeMeta = (type?: string | null): DocumentTypeMeta => {
+  const normalized = (type || '').toString().toLowerCase()
+  switch (normalized) {
+    case 'delivery_note':
+      return {
+        key: 'delivery_note',
+        label: 'Bon de livraison',
+        description: 'Document de livraison détecté automatiquement',
+        icon: Package,
+        badge: 'border-purple-200 bg-purple-100 text-purple-800'
+      }
+    case 'credit_note':
+      return {
+        key: 'credit_note',
+        label: 'Avoir',
+        description: 'Avoir ou note de crédit identifiée',
+        icon: RotateCcw,
+        badge: 'border-amber-200 bg-amber-100 text-amber-800'
+      }
+    case 'quote':
+      return {
+        key: 'quote',
+        label: 'Devis',
+        description: 'Devis ou proposition commerciale détecté',
+        icon: FilePenLine,
+        badge: 'border-sky-200 bg-sky-100 text-sky-800'
+      }
+    case 'other':
+      return {
+        key: 'other',
+        label: 'Document',
+        description: 'Document non catégorisé',
+        icon: FileQuestion,
+        badge: 'border-gray-200 bg-gray-100 text-gray-700'
+      }
+    default:
+      return {
+        key: 'invoice',
+        label: 'Facture',
+        description: 'Facture fournisseur détectée',
+        icon: FileText,
+        badge: 'border-emerald-200 bg-emerald-100 text-emerald-800'
+      }
+  }
+}
 
 interface AllocationFormRow {
   account_code: string
@@ -460,6 +518,36 @@ export default function InvoiceEditPage() {
     return `${dd}/${mm}/${yy}`
   }
 
+  const extracted: any = invoice?.extracted_data || {}
+  const documentMeta = getDocumentTypeMeta(invoice?.document_type ?? extracted.document_type)
+  const DocumentIcon = documentMeta.icon
+  const documentTypeKey = documentMeta.key
+  const documentReference: string | null = invoice?.document_reference
+    ?? extracted.document_reference
+    ?? extracted.invoice_number
+    ?? null
+  const deliveryNoteNumber: string | null = extracted.delivery_note_number || null
+  const normalizedInvoiceNumber: string | null = extracted.invoice_number || null
+  const relatedDeliveryNotes: string[] = Array.isArray(extracted.related_delivery_note_numbers)
+    ? extracted.related_delivery_note_numbers
+    : []
+  const relatedInvoiceNumbers: string[] = Array.isArray(extracted.related_invoice_numbers)
+    ? extracted.related_invoice_numbers
+    : []
+  const relatedList = documentTypeKey === 'invoice' ? relatedDeliveryNotes : relatedInvoiceNumbers
+  const relatedLabel = documentTypeKey === 'invoice' ? 'Bons de livraison associés' : 'Factures associées'
+  const pairedDocument = invoice?.paired_document
+  const pairedExtracted: any = pairedDocument?.extracted_data || {}
+  const pairedMeta = pairedDocument
+    ? getDocumentTypeMeta(pairedDocument.document_type ?? pairedExtracted.document_type)
+    : null
+  const pairedReference = pairedDocument
+    ? (pairedDocument.document_reference
+        ?? pairedExtracted.document_reference
+        ?? pairedExtracted.invoice_number
+        ?? '')
+    : ''
+
   return (
     <div className="min-h-screen bg-gray-50 py-8">
       <div className="mx-auto px-4 sm:px-6 lg:px-8">
@@ -471,6 +559,60 @@ export default function InvoiceEditPage() {
             )}
             <Button variant="outline" onClick={() => router.push('/invoices')}>Retour</Button>
           </div>
+        </div>
+
+        <div className="mb-6 rounded-lg border border-dashed border-gray-200 bg-white/60 p-4">
+          <div className="flex flex-wrap items-center gap-3 text-sm text-gray-700">
+            <span className={`inline-flex items-center gap-2 rounded-full border px-3 py-1 font-semibold shadow-sm ${documentMeta.badge}`}>
+              <DocumentIcon className="h-4 w-4" />
+              {documentMeta.label}
+            </span>
+            {documentReference && (
+              <span className="inline-flex items-center gap-2 rounded-full border border-gray-200 bg-white px-3 py-1 font-medium text-gray-700 shadow-sm">
+                <Hash className="h-4 w-4 text-gray-500" />
+                Réf. {documentReference}
+              </span>
+            )}
+            {documentTypeKey === 'invoice' && deliveryNoteNumber && (
+              <span className="inline-flex items-center gap-2 rounded-full border border-purple-200 bg-purple-50 px-3 py-1 text-purple-700 shadow-sm">
+                <Package className="h-4 w-4" />
+                BL {deliveryNoteNumber}
+              </span>
+            )}
+            {documentTypeKey === 'delivery_note' && normalizedInvoiceNumber && (
+              <span className="inline-flex items-center gap-2 rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-emerald-700 shadow-sm">
+                <FileText className="h-4 w-4" />
+                Facture {normalizedInvoiceNumber}
+              </span>
+            )}
+          </div>
+
+          {relatedList.length > 0 && (
+            <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-gray-600">
+              <span className="font-semibold uppercase tracking-wide text-gray-500">{relatedLabel}</span>
+              {relatedList.map(ref => (
+                <span key={ref} className="rounded-full bg-gray-100 px-2 py-0.5 font-medium text-gray-700">
+                  {ref}
+                </span>
+              ))}
+            </div>
+          )}
+
+          {pairedDocument && pairedMeta && (
+            <div className="mt-3 flex flex-wrap items-center gap-2">
+              <Link
+                href={`/invoices/${pairedDocument.id}`}
+                className="inline-flex items-center gap-2 rounded-md border border-blue-200 bg-blue-50 px-3 py-1 text-sm font-medium text-blue-700 shadow-sm transition hover:bg-blue-100"
+              >
+                <Link2 className="h-4 w-4" />
+                {pairedMeta.label}
+                {pairedReference ? `• ${pairedReference}` : ''}
+              </Link>
+              {pairedDocument.created_at && (
+                <span className="text-xs text-blue-500">({formatShortDate(pairedDocument.created_at)})</span>
+              )}
+            </div>
+          )}
         </div>
 
         {error && (

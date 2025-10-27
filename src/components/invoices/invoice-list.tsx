@@ -5,9 +5,65 @@ import { createClient } from '@/utils/supabase/client'
 import { Button } from '@/components/ui/button'
 import { LoadingSpinner } from '@/components/ui/loading-spinner'
 import { formatCurrency, formatTitleCaseName, getActiveOrganizationId } from '@/lib/utils'
-import { FileText, Download, Eye, Trash2, CheckCircle2, Clock3, TriangleAlert } from 'lucide-react'
+import { FileText, Download, Eye, Trash2, CheckCircle2, Clock3, TriangleAlert, Package, RotateCcw, FilePenLine, FileQuestion, Link2, type LucideIcon } from 'lucide-react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
+
+type DocumentTypeKey = 'invoice' | 'delivery_note' | 'credit_note' | 'quote' | 'other'
+
+interface ListDocumentTypeMeta {
+  key: DocumentTypeKey
+  label: string
+  icon: LucideIcon
+  badge: string
+  iconClass: string
+}
+
+const resolveDocumentTypeMeta = (raw?: string | null): ListDocumentTypeMeta => {
+  const normalized = (raw || '').toString().toLowerCase()
+  switch (normalized) {
+    case 'delivery_note':
+      return {
+        key: 'delivery_note',
+        label: 'Bon de livraison',
+        icon: Package,
+        badge: 'border-purple-200 bg-purple-50 text-purple-700',
+        iconClass: 'text-purple-500'
+      }
+    case 'credit_note':
+      return {
+        key: 'credit_note',
+        label: 'Avoir',
+        icon: RotateCcw,
+        badge: 'border-amber-200 bg-amber-50 text-amber-700',
+        iconClass: 'text-amber-500'
+      }
+    case 'quote':
+      return {
+        key: 'quote',
+        label: 'Devis',
+        icon: FilePenLine,
+        badge: 'border-sky-200 bg-sky-50 text-sky-700',
+        iconClass: 'text-sky-500'
+      }
+    case 'other':
+      return {
+        key: 'other',
+        label: 'Document',
+        icon: FileQuestion,
+        badge: 'border-gray-200 bg-gray-100 text-gray-700',
+        iconClass: 'text-gray-500'
+      }
+    default:
+      return {
+        key: 'invoice',
+        label: 'Facture',
+        icon: FileText,
+        badge: 'border-emerald-200 bg-emerald-50 text-emerald-700',
+        iconClass: 'text-emerald-500'
+      }
+  }
+}
 
 export function InvoiceList({ from, to }: { from?: string; to?: string }) {
   const [rawInvoices, setRawInvoices] = useState<any[]>([])
@@ -57,7 +113,7 @@ export function InvoiceList({ from, to }: { from?: string; to?: string }) {
 
       let query = supabase
         .from('invoices')
-        .select('id, file_name, file_path, created_at, status, extracted_data, user_id, organization_id, supplier_id, supplier:suppliers ( id, code, display_name, validation_status, is_active )')
+        .select('id, file_name, file_path, created_at, status, document_type, document_reference, paired_document_id, extracted_data, user_id, organization_id, supplier_id, supplier:suppliers ( id, code, display_name, validation_status, is_active )')
         .order('created_at', { ascending: false })
 
       if (filter !== 'all') {
@@ -392,11 +448,15 @@ export function InvoiceList({ from, to }: { from?: string; to?: string }) {
                 const fileNameDisplay = truncate(inv.file_name, 40)
                 const supplierDisplay = truncate(formatTitleCaseName(String(inv?.supplier?.display_name || ed.supplier_name || '')), 30)
                 const rowIndex = (page - 1) * pageSize + idx + 1
-                
+                const docMeta = resolveDocumentTypeMeta(inv.document_type ?? ed.document_type)
+                const DocumentIcon = docMeta.icon
+                const documentReference = inv.document_reference || ed.document_reference || ed.invoice_number || ''
+                const documentReferenceDisplay = documentReference ? truncate(documentReference, 40) : ''
+
                 // Vérifier si le fournisseur est en attente de validation
                 const isSupplierPending = inv?.supplier?.validation_status === 'pending'
                   || (!inv?.supplier_id && !!ed?.supplier_name) // pas encore lié, mais un nom a été extrait
-                const rowClassName = isSupplierPending 
+                const rowClassName = isSupplierPending
                   ? "border-t bg-gradient-to-r from-yellow-50 to-orange-50 hover:from-yellow-100 hover:to-orange-100 cursor-pointer border-l-4 border-l-yellow-500"
                   : "border-t odd:bg-gray-50 hover:bg-blue-50/40 cursor-pointer"
                 
@@ -410,11 +470,27 @@ export function InvoiceList({ from, to }: { from?: string; to?: string }) {
                     <td className="px-2 py-1">{rowIndex}</td>
                     <td className="px-2 py-1 w-[420px]">
                       <div className="flex items-center space-x-1.5">
-                        <FileText className="h-3 w-3 text-gray-400" />
+                        <DocumentIcon className={`h-3 w-3 ${docMeta.iconClass}`} />
                         <Link href={`/invoices/${inv.id}`} className="font-medium text-gray-900 truncate block max-w-[380px] hover:underline" title={inv.file_name}>
                           {fileNameDisplay}
                         </Link>
                       </div>
+                      <div className="mt-1 flex flex-wrap items-center gap-1 text-[10px] font-semibold uppercase tracking-wide">
+                        <span className={`inline-flex items-center gap-1 rounded-full border px-1.5 py-0.5 ${docMeta.badge}`}>
+                          {docMeta.label}
+                        </span>
+                        {inv.paired_document_id && (
+                          <span className="inline-flex items-center gap-1 rounded-full border border-blue-200 bg-blue-50 px-1.5 py-0.5 text-blue-700">
+                            <Link2 className="h-3 w-3" />
+                            Apparié
+                          </span>
+                        )}
+                      </div>
+                      {documentReference && (
+                        <div className="mt-1 text-[10px] uppercase tracking-wide text-gray-500" title={documentReference}>
+                          Réf. {documentReferenceDisplay}
+                        </div>
+                      )}
                     </td>
                     <td className="px-2 py-1 w-[260px]">
                       <div className="flex items-center gap-2">

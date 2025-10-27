@@ -102,6 +102,9 @@ export type Database = {
           id: string
           mime_type: string
           organization_id: string | null
+          document_type: string | null
+          document_reference: string | null
+          paired_document_id: string | null
           status: string | null
           supplier_id: string | null
           updated_at: string
@@ -118,6 +121,9 @@ export type Database = {
           id?: string
           mime_type: string
           organization_id?: string | null
+          document_type?: string | null
+          document_reference?: string | null
+          paired_document_id?: string | null
           status?: string | null
           supplier_id?: string | null
           updated_at?: string
@@ -134,6 +140,9 @@ export type Database = {
           id?: string
           mime_type?: string
           organization_id?: string | null
+          document_type?: string | null
+          document_reference?: string | null
+          paired_document_id?: string | null
           status?: string | null
           supplier_id?: string | null
           updated_at?: string
