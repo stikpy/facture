@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { useParams, useRouter } from 'next/navigation'
+import { useParams, useRouter, useSearchParams } from 'next/navigation'
 import Link from 'next/link'
 import { createClient } from '@/utils/supabase/client'
 import { Button } from '@/components/ui/button'
@@ -77,6 +77,8 @@ interface AllocationFormRow {
 export default function InvoiceEditPage() {
   const params = useParams<{ id: string }>()
   const router = useRouter()
+  const searchParams = useSearchParams()
+  const ctxSupplierId = searchParams.get('supplier_id') || undefined
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -122,6 +124,9 @@ export default function InvoiceEditPage() {
   // Gestion de l'état de modification pour griser le bouton Enregistrer
   const [initialSignature, setInitialSignature] = useState<string | null>(null)
   const [isDirty, setIsDirty] = useState(false)
+  // Navigation contexte
+  const [prevId, setPrevId] = useState<string | null>(null)
+  const [nextId, setNextId] = useState<string | null>(null)
   const round2 = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100
   const vatRateFromCode = (code?: string) => {
     const v = findVatByCode(code)
@@ -281,6 +286,31 @@ export default function InvoiceEditPage() {
           allocations: incoming,
         })
         setInitialSignature(initSig)
+
+        // Calculer les voisins (précédent/suivant) selon le contexte
+        try {
+          const currentCreatedAt = data.invoice?.created_at as string
+          const orgId = data.invoice?.organization_id as string
+          if (currentCreatedAt && orgId) {
+            // previous = plus récent; next = plus ancien dans tri desc
+            const base = supabase.from('invoices').select('id, created_at').eq('organization_id', orgId)
+            const bySupplier = ctxSupplierId ? base.eq('supplier_id', ctxSupplierId) : base
+
+            const { data: newer } = await (bySupplier
+              .gt('created_at', currentCreatedAt)
+              .order('created_at', { ascending: false })
+              .limit(1) as any)
+            const { data: older } = await (bySupplier
+              .lt('created_at', currentCreatedAt)
+              .order('created_at', { ascending: false })
+              .limit(1) as any)
+
+            setPrevId(newer && newer.length ? newer[0].id : null)
+            setNextId(older && older.length ? older[0].id : null)
+          }
+        } catch (e) {
+          // silencieux
+        }
       } catch (e: any) {
         setError(e.message)
       } finally {
@@ -288,7 +318,22 @@ export default function InvoiceEditPage() {
       }
     }
     fetchData()
-  }, [params.id, router])
+  }, [params.id, router, ctxSupplierId])
+
+  // Navigation clavier ← →
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'ArrowLeft' && prevId) {
+        e.preventDefault()
+        router.push(`/invoices/${prevId}${ctxSupplierId ? `?ctx=supplier&supplier_id=${ctxSupplierId}` : ''}`)
+      } else if (e.key === 'ArrowRight' && nextId) {
+        e.preventDefault()
+        router.push(`/invoices/${nextId}${ctxSupplierId ? `?ctx=supplier&supplier_id=${ctxSupplierId}` : ''}`)
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [prevId, nextId, router, ctxSupplierId])
 
   // Déterminer si des changements ont été faits
   useEffect(() => {
@@ -557,6 +602,15 @@ export default function InvoiceEditPage() {
             {!showPreview && (
               <Button variant="outline" onClick={() => setShowPreview(true)}>Afficher PDF</Button>
             )}
+            {/* Navigation */}
+            <div className="hidden md:flex items-center gap-2">
+              <Button variant="outline" disabled={!prevId} onClick={() => prevId && router.push(`/invoices/${prevId}${ctxSupplierId ? `?ctx=supplier&supplier_id=${ctxSupplierId}` : ''}`)}>
+                ← Précédente
+              </Button>
+              <Button variant="outline" disabled={!nextId} onClick={() => nextId && router.push(`/invoices/${nextId}${ctxSupplierId ? `?ctx=supplier&supplier_id=${ctxSupplierId}` : ''}`)}>
+                Suivante →
+              </Button>
+            </div>
             <Button variant="outline" onClick={() => router.push('/invoices')}>Retour</Button>
           </div>
         </div>

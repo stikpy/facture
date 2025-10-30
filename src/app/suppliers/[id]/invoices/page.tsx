@@ -318,7 +318,7 @@ export default function SupplierInvoicesPage() {
                           <Button 
                             variant="outline" 
                             size="sm"
-                            onClick={() => router.push(`/invoices/${invoice.id}`)}
+                            onClick={() => router.push(`/invoices/${invoice.id}?ctx=supplier&supplier_id=${supplierId}`)}
                           >
                             Voir
                           </Button>
