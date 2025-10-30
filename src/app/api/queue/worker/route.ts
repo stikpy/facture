@@ -214,6 +214,14 @@ export async function GET(request: NextRequest) {
       // Post-correction: si un nom fournisseur fiable est trouvé en tête, le privilégier
       try {
         const ed: any = extractedData || {}
+        // Cas spécial SYSCO (mise en page atypique)
+        if (/\bSYSCO\b/i.test(extractedText) && !/client/i.test(String(ed?.supplier_name||''))) {
+          const syscoName = 'SYSCO France'
+          if (!ed.supplier_name || !String(ed.supplier_name).toLowerCase().includes('sysco')) {
+            console.log('[WORKER] Override supplier_name (heuristique SYSCO):', { from: ed.supplier_name, to: syscoName })
+            ed.supplier_name = syscoName
+          }
+        }
         if (supplierHeaderCandidate) {
           const clientNorm = String(ed.client_name || '').toLowerCase().trim()
           const candNorm = supplierHeaderCandidate.toLowerCase().trim()

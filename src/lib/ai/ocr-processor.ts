@@ -68,26 +68,10 @@ export class OCRProcessor {
       const numPages = Number((data as any)?.numpages || 0)
       console.log('[OCR] pdf-parse pages:', numPages)
       
-      // Si le PDF a plusieurs pages, préférer une extraction page-par-page
-      if (numPages > 1) {
-        console.log('[OCR] Document multi-pages, tentative page-par-page…')
-        const ocrResult = await this.ocrPdfPages(pdfBuffer)
-        this.lastAlternatives = ocrResult.alternativeRotations || []
-        if (ocrResult.texts.length > 0) {
-          const concatLen = ocrResult.texts.join('\n').length
-          // Si l'extraction page-par-page est plus riche que le texte global, retourner les pages
-          if (concatLen >= text.length * 0.8) {
-            return ocrResult.texts
-          }
-        }
-        // fallback au texte global si page-par-page trop pauvre
-        if (text && text.length > 30) return [text]
-      }
-      
-      // Si pdf-parse renvoie du contenu (même mono-page), l'utiliser directement
+      // Si pdf-parse renvoie du contenu (même multi‑pages), l'utiliser directement
       if (text && text.length > 30) return [text]
-      
-      // Sinon, tenter l'OCR sur le PDF scanné
+
+      // Sinon, tenter l'OCR sur le PDF scanné (fallback lourd)
       console.log('[OCR] pdf-parse vide, tentative OCR fallback...')
       const ocrResult = await this.ocrPdfPages(pdfBuffer)
       console.log('[OCR] Fallback PDF OCR pages count:', ocrResult.texts.length)
