@@ -293,20 +293,24 @@ export default function InvoiceEditPage() {
           const orgId = data.invoice?.organization_id as string
           if (currentCreatedAt && orgId) {
             // previous = plus récent; next = plus ancien dans tri desc
-            const base = supabase.from('invoices').select('id, created_at').eq('organization_id', orgId)
-            const bySupplier = ctxSupplierId ? base.eq('supplier_id', ctxSupplierId) : base
+            const makeBase = () => {
+              let q = supabase.from('invoices').select('id, created_at').eq('organization_id', orgId)
+              if (ctxSupplierId) q = q.eq('supplier_id', ctxSupplierId)
+              return q
+            }
 
-            const { data: newer } = await (bySupplier
+            const { data: newer } = await (makeBase()
               .gt('created_at', currentCreatedAt)
               .order('created_at', { ascending: false })
               .limit(1) as any)
-            const { data: older } = await (bySupplier
+            const { data: older } = await (makeBase()
               .lt('created_at', currentCreatedAt)
               .order('created_at', { ascending: false })
               .limit(1) as any)
 
             setPrevId(newer && newer.length ? newer[0].id : null)
             setNextId(older && older.length ? older[0].id : null)
+            console.log('[NAV] voisins calculés', { prev: newer?.[0]?.id || null, next: older?.[0]?.id || null, ctxSupplierId })
           }
         } catch (e) {
           // silencieux
