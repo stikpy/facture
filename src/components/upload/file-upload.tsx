@@ -35,22 +35,35 @@ export function FileUpload() {
 
     setFiles(prev => [...prev, ...newFiles])
 
-    // Traiter chaque fichier
-    for (const fileData of newFiles) {
+    // Phase 1: uploader tous les fichiers, puis seulement lancer le traitement
+    console.log('🚦 [CLIENT] Phase 1: upload de tous les fichiers…')
+    const uploaded: Array<{ tmpId: string; fileId: string }> = []
+    await Promise.allSettled(newFiles.map(async (f) => {
       try {
-        console.log(`📤 [CLIENT] Début traitement pour: ${fileData.file.name} (ID: ${fileData.id})`)
-        await uploadAndProcessFile(fileData)
-      } catch (error) {
-        console.error(`❌ [CLIENT] Erreur upload pour ${fileData.file.name}:`, error)
-        updateFileStatus(fileData.id, 'error', 0, (error as Error).message)
+        const fileId = await uploadOnly(f)
+        uploaded.push({ tmpId: f.id, fileId })
+      } catch (e) {
+        console.error(`❌ [CLIENT] Upload échoué pour ${f.file.name}`, e)
+        updateFileStatus(f.id, 'error', 0, (e as Error).message)
       }
-    }
+    }))
 
-    console.log('🏁 [CLIENT] Tous les uploads terminés')
+    console.log('🚦 [CLIENT] Phase 2: mise en file + traitement…')
+    await Promise.allSettled(uploaded.map(async (u) => {
+      try {
+        await enqueueAndPoll(u.fileId, u.tmpId)
+      } catch (e) {
+        console.error('❌ [CLIENT] Erreur traitement:', e)
+        updateFileStatus(u.tmpId, 'error', 0, (e as Error).message)
+      }
+    }))
+
+    console.log('🏁 [CLIENT] Upload + traitements déclenchés')
     setIsUploading(false)
   }, [])
 
-  const uploadAndProcessFile = async (fileData: UploadedFile) => {
+  // Étape 1: uploader seulement et retourner l'id de facture
+  const uploadOnly = async (fileData: UploadedFile): Promise<string> => {
     try {
       console.log('🚀 [CLIENT] ===== DÉBUT UPLOAD =====')
       console.log(`📁 [CLIENT] Fichier: ${fileData.file.name}`)
@@ -126,36 +139,39 @@ export function FileUpload() {
       const result = await response.json()
       console.log(`✅ [CLIENT] Upload réussi pour ${fileData.file.name}:`, result)
       
-      // 2. Ajouter à la queue de traitement
-      console.log(`📋 [CLIENT] Ajout à la queue pour ${fileData.file.name}`)
-      updateFileStatus(fileData.id, 'processing', 50)
-      
-      const queueResponse = await fetch('/api/queue/add', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${session.access_token}`
-        },
-        body: JSON.stringify({
-          invoiceId: result.fileId
-        })
-      })
-
-      if (!queueResponse.ok) {
-        const errorData = await queueResponse.json()
-        throw new Error(errorData.error || 'Erreur lors de l\'ajout à la queue')
-      }
-
-      const queueResult = await queueResponse.json()
-      console.log(`✅ [CLIENT] Ajouté à la queue pour ${fileData.file.name}:`, queueResult)
-      
-      // 3. Polling pour suivre le statut
-      await pollProcessingStatus(result.fileId, fileData.id, session.access_token)
-      
+      // Retourner l'id pour traitement ultérieur
+      updateFileStatus(fileData.id, 'uploading', 100)
+      return result.fileId as string
     } catch (error) {
-      console.error(`❌ [CLIENT] Erreur dans uploadAndProcessFile pour ${fileData.file.name}:`, error)
+      console.error(`❌ [CLIENT] Erreur upload pour ${fileData.file.name}:`, error)
       updateFileStatus(fileData.id, 'error', 0, (error as Error).message)
+      throw error
     }
+  }
+
+  // Étape 2: ajouter en file et lancer le polling
+  const enqueueAndPoll = async (invoiceId: string, tmpId: string) => {
+    const supabase = createClient()
+    const { data: { session } } = await supabase.auth.getSession()
+    if (!session) throw new Error('Session expirée')
+
+    updateFileStatus(tmpId, 'processing', 50)
+
+    const queueResponse = await fetch('/api/queue/add', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${session.access_token}`
+      },
+      body: JSON.stringify({ invoiceId })
+    })
+
+    if (!queueResponse.ok) {
+      const errorData = await queueResponse.json()
+      throw new Error(errorData.error || 'Erreur lors de l\'ajout à la queue')
+    }
+
+    await pollProcessingStatus(invoiceId, tmpId, session.access_token)
   }
 
   const pollProcessingStatus = async (invoiceId: string, fileId: string, token: string) => {
