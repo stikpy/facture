@@ -73,7 +73,7 @@ export class OCRProcessor {
 
       // Sinon, tenter l'OCR sur le PDF scanné (fallback lourd)
       console.log('[OCR] pdf-parse vide, tentative OCR fallback...')
-      const ocrResult = await this.ocrPdfPages(pdfBuffer)
+      const ocrResult = await this.ocrPdfPages(pdfBuffer, numPages || undefined)
       console.log('[OCR] Fallback PDF OCR pages count:', ocrResult.texts.length)
       
       // Stocker les rotations alternatives pour fallback si extraction échoue
@@ -101,37 +101,37 @@ export class OCRProcessor {
     }
   }
 
-  private async ocrPdfPages(pdfBuffer: Buffer): Promise<{ texts: string[], alternativeRotations?: Array<{rotation: number, score: number, text: string}> }> {
+  private async ocrPdfPages(pdfBuffer: Buffer, numPagesHint?: number): Promise<{ texts: string[], alternativeRotations?: Array<{rotation: number, score: number, text: string}> }> {
     try {
-      console.log('[OCR] Tentative OCR sur PDF scanné via pdf-to-png + Tesseract')
-      
-      // Convertir première page PDF → PNG via pdf-to-png
-      const { pdfToPng } = require('pdf-to-png-converter')
-      const pngPages = await pdfToPng(pdfBuffer, {
-        disableFontFace: false,
-        useSystemFonts: false,
-        viewportScale: 3.0, // Augmenté pour meilleure qualité
-        outputFolder: undefined, // En mémoire
-        strictPagesToProcess: false,
-        verbosityLevel: 0,
-        // Ne pas restreindre: traiter toutes les pages (un cap sera appliqué ci-dessous)
-        pagesToProcess: undefined
-      })
-      
-      console.log(`[OCR] ${pngPages.length} pages PNG générées`)
-      
-      if (!pngPages || pngPages.length === 0) {
-        console.warn('[OCR] Aucune page PNG générée')
-        return { texts: [] }
+      console.log('[OCR] Tentative OCR sur PDF scanné via sharp -> PNG + Tesseract')
+
+      // Rasteriser les pages PDF avec sharp (évite pdfjs worker)
+      const pngPages: Array<{ content: Buffer }> = []
+      const maxPages = Math.min(numPagesHint || 4, 12)
+      for (let i = 0; i < maxPages; i++) {
+        try {
+          const pagePng = await sharp(pdfBuffer, { density: 260, page: i })
+            .png()
+            .toBuffer()
+          if (pagePng && pagePng.length > 0) pngPages.push({ content: pagePng })
+        } catch (e) {
+          if (i === 0) {
+            console.warn('[OCR] sharp rasterize page 0 failed:', e)
+          }
+          break // stop if we cannot rasterize further pages
+        }
       }
+
+      console.log(`[OCR] ${pngPages.length} pages PNG générées (sharp)`)      
+      if (!pngPages.length) return { texts: [] }
       
       // OCR sur chaque page PNG avec test de rotation
       await this.initialize()
       const pageTexts: string[] = []
       const allRotationResults: Array<{rotation: number, score: number, text: string}> = []
       
-      const maxPages = Math.min(pngPages.length, 12) // Cap de sécurité
-      for (let i = 0; i < maxPages; i++) {
+      const cap = Math.min(pngPages.length, 12) // Cap de sécurité
+      for (let i = 0; i < cap; i++) {
         const page = pngPages[i]
         console.log(`[OCR] Traitement page ${i + 1}, taille: ${page.content?.length || 0} bytes`)
         
