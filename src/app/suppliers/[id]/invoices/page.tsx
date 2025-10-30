@@ -267,6 +267,9 @@ export default function SupplierInvoicesPage() {
                       Date
                     </th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Montant HT
+                    </th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                       Montant
                     </th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
@@ -293,7 +296,7 @@ export default function SupplierInvoicesPage() {
                           {invoice.extracted_data?.invoice_number || '-'}
                         </div>
                       </td>
-                      <td className="px-6 py-4 whitespace-nowrap">
+                    <td className="px-6 py-4 whitespace-nowrap">
                         <div className="text-sm text-gray-900">
                           {invoice.extracted_data?.invoice_date ? formatDate(invoice.extracted_data.invoice_date) : '-'}
                         </div>
@@ -303,6 +306,11 @@ export default function SupplierInvoicesPage() {
                           </div>
                         )}
                       </td>
+                    <td className="px-6 py-4 whitespace-nowrap">
+                      <div className="text-sm font-medium text-gray-900">
+                        {typeof invoice.extracted_data?.subtotal === 'number' ? formatCurrency(invoice.extracted_data.subtotal) : '-'}
+                      </div>
+                    </td>
                       <td className="px-6 py-4 whitespace-nowrap">
                         <div className="text-sm font-medium text-gray-900">
                           {invoice.extracted_data?.total_amount ? formatCurrency(invoice.extracted_data.total_amount) : '-'}
