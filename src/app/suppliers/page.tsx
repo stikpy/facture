@@ -311,8 +311,10 @@ export default function SuppliersPage() {
   })
 
   // Séparer les fournisseurs en attente et les autres
-  const pendingSuppliers = filteredSuppliers.filter(s => s.validation_status === 'pending')
-  const otherSuppliers = filteredSuppliers.filter(s => s.validation_status !== 'pending')
+  // Considérer NULL comme "pending" quand is_active=false (legacy/compat)
+  const statusOrDerived = (s: Supplier) => (s.validation_status ?? (s.is_active ? 'validated' : 'pending'))
+  const pendingSuppliers = filteredSuppliers.filter(s => statusOrDerived(s) === 'pending')
+  const otherSuppliers = filteredSuppliers.filter(s => statusOrDerived(s) !== 'pending')
 
   if (authLoading || loading) {
     return <LoadingSpinner />
