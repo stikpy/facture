@@ -201,6 +201,9 @@ export async function POST(request: NextRequest) {
       if (!allowedTypes.has(ct)) return false
       if (!extOk) return ct === 'application/pdf' // PDF sans extension toléré
 
+      // 1bis) Les PDF sont toujours traités (peu importe content-id/disposition)
+      if (ct === 'application/pdf') return true
+
       // 2) ignorer les inline/embeds (logos)
       if (args.disposition && args.disposition.toLowerCase() === 'inline') return false
       if (args.contentId) return false
