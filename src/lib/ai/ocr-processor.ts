@@ -85,6 +85,23 @@ export class OCRProcessor {
       if (ocrResult.texts.length > 0) {
         return ocrResult.texts
       }
+
+      // Dernier recours: OCR via OCR.space (API externe)
+      try {
+        const apiKey = process.env.OCRSPACE_API_KEY || ''
+        if (apiKey) {
+          console.log('[OCR] Tentative OCR via OCR.space (dernier recours)')
+          const texts = await this.ocrViaOcrSpace(pdfBuffer)
+          if (texts.length > 0 && texts.join('\n').trim().length > 0) {
+            console.log('[OCR] OCR.space a renvoyé du texte (longueur totale):', texts.join('\n').length)
+            return texts
+          }
+        } else {
+          console.warn('[OCR] OCRSPACE_API_KEY non configurée — skip OCR.space')
+        }
+      } catch (e) {
+        console.warn('[OCR] OCR.space fallback échec:', e)
+      }
       
       // Si échec complet, retourner vide
       return [text]
@@ -216,6 +233,46 @@ export class OCRProcessor {
     } catch (e) {
       console.warn('OCR PDF fallback échec:', e)
       return { texts: [] }
+    }
+  }
+
+  // OCR via OCR.space (API HTTP) — utilisé en dernier recours
+  private async ocrViaOcrSpace(pdfBuffer: Buffer): Promise<string[]> {
+    try {
+      const apiKey = process.env.OCRSPACE_API_KEY
+      if (!apiKey) return []
+
+      const base64 = pdfBuffer.toString('base64')
+      const body = new URLSearchParams()
+      body.set('apikey', apiKey)
+      body.set('language', 'fre,eng')
+      body.set('isOverlayRequired', 'false')
+      body.set('OCREngine', '2')
+      body.set('filetype', 'PDF')
+      body.set('scale', 'true')
+      body.set('isCreateSearchablePdf', 'false')
+      body.set('base64Image', `data:application/pdf;base64,${base64}`)
+
+      const res = await fetch('https://api.ocr.space/parse/image', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body
+      })
+      if (!res.ok) {
+        console.warn('[OCR] OCR.space HTTP error', res.status, res.statusText)
+        return []
+      }
+      const json: any = await res.json()
+      if (json?.IsErroredOnProcessing) {
+        console.warn('[OCR] OCR.space errored:', json?.ErrorMessage || json?.ErrorDetails)
+        return []
+      }
+      const results = Array.isArray(json?.ParsedResults) ? json.ParsedResults : []
+      const pages = results.map((r: any) => String(r?.ParsedText || '')).filter((t: string) => t.trim().length > 0)
+      return pages.length ? pages : []
+    } catch (e) {
+      console.warn('[OCR] OCR.space exception:', e)
+      return []
     }
   }
 }
