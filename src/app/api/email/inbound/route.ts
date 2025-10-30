@@ -183,6 +183,36 @@ export async function POST(request: NextRequest) {
 
     // Collecter les pièces jointes
     const allowedTypes = new Set(['application/pdf', 'image/jpeg', 'image/png', 'image/tiff'])
+    const minImageBytes = Number(process.env.INBOUND_MIN_IMAGE_BYTES || 30_000) // éviter logos/icônes
+    const suspiciousNameRe = /(logo|icon|signature|footer|instagram|facebook|linkedin|twitter|tiktok|youtube|whatsapp|spacer|tracking|pixel)/i
+
+    const shouldProcessAttachment = (args: {
+      filename?: string
+      contentType?: string
+      size?: number
+      disposition?: string
+      contentId?: string
+    }) => {
+      const ct = (args.contentType || '').toLowerCase()
+      const name = (args.filename || '').toLowerCase()
+      const extOk = name.endsWith('.pdf') || name.endsWith('.jpg') || name.endsWith('.jpeg') || name.endsWith('.png') || name.endsWith('.tif') || name.endsWith('.tiff')
+
+      // 1) type autorisé + extension cohérente
+      if (!allowedTypes.has(ct)) return false
+      if (!extOk) return ct === 'application/pdf' // PDF sans extension toléré
+
+      // 2) ignorer les inline/embeds (logos)
+      if (args.disposition && args.disposition.toLowerCase() === 'inline') return false
+      if (args.contentId) return false
+
+      // 3) ignorer petits fichiers image (logos, pixels)
+      if (ct.startsWith('image/') && typeof args.size === 'number' && args.size < minImageBytes) return false
+
+      // 4) ignorer noms suspects (logos réseaux sociaux, signatures, etc.)
+      if (ct.startsWith('image/') && suspiciousNameRe.test(name)) return false
+
+      return true
+    }
     const storage = new StorageService()
     const created: { fileId: string; fileName: string }[] = []
 
@@ -239,8 +269,15 @@ export async function POST(request: NextRequest) {
       for (const att of attachments) {
         const tAttStart = Date.now()
         const contentType = att?.content_type || 'application/octet-stream'
-        if (!allowedTypes.has(contentType)) continue
         const filename = att?.filename || 'attachment'
+        const size = typeof att?.size === 'number' ? Number(att.size) : undefined
+        const disposition = att?.disposition || att?.content_disposition
+        const contentId = att?.content_id || att?.cid
+
+        if (!shouldProcessAttachment({ filename, contentType, size, disposition, contentId })) {
+          console.log('[inbound] skip attachment (resend)', { filename, contentType, size, disposition, contentId })
+          continue
+        }
         const downloadUrl = att?.download_url
         if (!downloadUrl) continue
         const response = await fetch(downloadUrl)
@@ -289,8 +326,14 @@ export async function POST(request: NextRequest) {
       for (const att of atts) {
         const tAttStart = Date.now()
         const contentType = att?.contentType || att?.ContentType || 'application/octet-stream'
-        if (!allowedTypes.has(contentType)) continue
         const filename = att?.filename || att?.name || att?.Name || 'attachment'
+        const size = typeof att?.contentLength === 'number' ? Number(att.contentLength) : (typeof att?.ContentLength === 'number' ? Number(att.ContentLength) : undefined)
+        const disposition = att?.contentDisposition || att?.ContentDisposition
+        const contentId = att?.contentID || att?.ContentID
+        if (!shouldProcessAttachment({ filename, contentType, size, disposition, contentId })) {
+          console.log('[inbound] skip attachment (postmark-like)', { filename, contentType, size, disposition, contentId })
+          continue
+        }
         let buffer: Buffer | null = null
         const b64 = att?.content || att?.Content
         const url = att?.downloadUrl || att?.url
