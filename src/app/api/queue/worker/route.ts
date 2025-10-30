@@ -80,16 +80,10 @@ export async function GET(request: NextRequest) {
       let pageTexts: string[] = []
       let alternativeTexts: Array<{rotation: number, score: number, text: string}> = []
       
-      // Heuristique: extraire depuis l'en-tête FACTURE la vraie date/numéro de facture
+      // Heuristique: extraire depuis le bloc "FACTURE" la date et le numéro
       const parseHeaderFromText = (txt: string): { headerDate?: string, headerNumber?: string } => {
         try {
           const s = String(txt || '')
-          // Chercher bloc proche du mot FACTURE avec champs Date / N° (ordre variable)
-          const headerRegex = /FACTURE[\s\S]{0,300}?(?:Date\s*:?\s*(\d{1,2}\/\d{1,2}\/\d{2,4}).*?N[°º]?\s*:?\s*([A-Za-z0-9\-]+)|N[°º]?\s*:?\s*([A-Za-z0-9\-]+).*?Date\s*:?\s*(\d{1,2}\/\d{1,2}\/\d{2,4}))/i
-          const m = s.match(headerRegex)
-          if (!m) return {}
-          let dateStr = m[1] || m[4]
-          let numStr = m[2] || m[3]
           const toIso = (d: string) => {
             const [dd, mm, yy] = d.split('/')
             let yyyy = yy
@@ -99,8 +93,32 @@ export async function GET(request: NextRequest) {
             }
             return `${yyyy.padStart(4,'0')}-${mm.padStart(2,'0')}-${dd.padStart(2,'0')}`
           }
-          const headerDate = dateStr ? toIso(dateStr) : undefined
-          const headerNumber = numStr || undefined
+
+          const idx = s.toLowerCase().indexOf('facture')
+          const windowStart = Math.max(0, idx === -1 ? 0 : idx - 400)
+          const windowEnd = Math.min(s.length, idx === -1 ? Math.min(1000, s.length) : idx + 800)
+          const w = s.slice(windowStart, windowEnd)
+
+          // Numéro: "FACTURE N° 3350928854" ou variantes
+          const numMatch = w.match(/FACTURE\s*(?:N[°ºo]?|No|N°)\s*([A-Za-z0-9\-\/]+)/i) || w.match(/N[°ºo]?\s*:?\s*([A-Za-z0-9\-\/]+)\b.*?FACTURE/i)
+
+          // Date proche, mais ignorer échéance / impression / livraison
+          const dateCandidates = Array.from(w.matchAll(/Date\s*:?[\s]*([0-3]?\d\/[01]?\d\/[12]?\d{2,3}\d)/gi))
+            .map(m => m[1])
+            .filter(Boolean)
+          let pickedDate: string | undefined
+          if (dateCandidates.length) {
+            // choisir la première date dont la ligne ne contient pas de mots exclus
+            const lines = w.split(/\r?\n/)
+            for (const d of dateCandidates) {
+              const line = lines.find(L => L.includes(d)) || ''
+              if (!/(échéance|echeance|impression|livraison)/i.test(line)) { pickedDate = d; break }
+            }
+            if (!pickedDate) pickedDate = dateCandidates[0]
+          }
+
+          const headerDate = pickedDate ? toIso(pickedDate) : undefined
+          const headerNumber = numMatch ? numMatch[1] : undefined
           return { headerDate, headerNumber }
         } catch { return {} }
       }
