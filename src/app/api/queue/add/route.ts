@@ -34,7 +34,7 @@ export async function POST(request: NextRequest) {
     // Vérifier que la facture existe et appartient à l'organisation de l'utilisateur
     const { data: invoice, error: invoiceError } = await supabaseAdmin
       .from('invoices')
-      .select('id, user_id, organization_id')
+      .select('id, user_id, organization_id, status, extracted_data')
       .eq('id', invoiceId)
       .single()
 
@@ -51,6 +51,34 @@ export async function POST(request: NextRequest) {
     if ((invoice as any).organization_id && orgIds.length > 0 && !orgIds.includes((invoice as any).organization_id)) {
       return NextResponse.json({ error: 'Accès interdit à cette facture' }, { status: 403 })
     }
+
+    // Si doublon détecté précédemment et toujours en conflit, empêcher la relance
+    try {
+      const invNum = (invoice as any)?.extracted_data?.invoice_number
+      const orgId = (invoice as any)?.organization_id
+      const supplierId = (invoice as any)?.supplier_id
+      if (invNum && orgId && supplierId) {
+        const { data: dup } = await (supabaseAdmin as any)
+          .from('invoices')
+          .select('id')
+          .eq('organization_id', orgId)
+          .eq('supplier_id', supplierId)
+          .neq('id', invoiceId)
+          .filter('extracted_data->>invoice_number', 'eq', String(invNum))
+        if (Array.isArray(dup) && dup.length > 0) {
+          try {
+            await (supabaseAdmin as any)
+              .from('invoices')
+              .update({ status: 'awaiting_user' } as any)
+              .eq('id', invoiceId)
+          } catch {}
+          return NextResponse.json({
+            error: 'duplicate_pending_user_action',
+            message: 'Un document avec le même numéro existe déjà. Corrigez le N° avant de relancer.'
+          }, { status: 409 })
+        }
+      }
+    } catch {}
 
     // Vérifier si une tâche existe déjà pour cette facture
     const { data: existingTask } = await supabaseAdmin
@@ -73,6 +101,14 @@ export async function POST(request: NextRequest) {
         message: 'Tâche déjà en queue'
       })
     }
+
+    // Mettre la facture en pending (feedback immédiat UI)
+    try {
+      await (supabaseAdmin as any)
+        .from('invoices')
+        .update({ status: 'queued' } as any)
+        .eq('id', invoiceId)
+    } catch {}
 
     // Ajouter la tâche à la queue
     const { data: task, error: queueError } = await ((supabaseAdmin as any)

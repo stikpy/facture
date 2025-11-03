@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useParams, useRouter, useSearchParams } from 'next/navigation'
 import Link from 'next/link'
 import { createClient } from '@/utils/supabase/client'
@@ -121,6 +121,11 @@ export default function InvoiceEditPage() {
   const [subtotal, setSubtotal] = useState<string>('')
   const [taxAmount, setTaxAmount] = useState<string>('')
   const [totalAmount, setTotalAmount] = useState<string>('')
+  const [retrying, setRetrying] = useState(false)
+  const [showErrorDetails, setShowErrorDetails] = useState(false)
+  const [queueMeta, setQueueMeta] = useState<{ taskId?: string, status?: string, attempts?: number, errorMessage?: string, createdAt?: string, startedAt?: string, completedAt?: string } | null>(null)
+  const [duplicateCandidates, setDuplicateCandidates] = useState<any[]>([])
+  const propsRef = useRef<HTMLDivElement | null>(null)
   // Gestion de l'état de modification pour griser le bouton Enregistrer
   const [initialSignature, setInitialSignature] = useState<string | null>(null)
   const [isDirty, setIsDirty] = useState(false)
@@ -323,6 +328,73 @@ export default function InvoiceEditPage() {
     }
     fetchData()
   }, [params.id, router, ctxSupplierId])
+
+  // Charger les métadonnées de queue pour afficher des détails utiles lorsque status === error
+  useEffect(() => {
+    const loadQueueMeta = async () => {
+      try {
+        if (!invoice?.id) return
+        const { data: { session } } = await supabase.auth.getSession()
+        const r = await fetch(`/api/queue/status?invoiceId=${invoice.id}`, {
+          headers: session?.access_token ? { Authorization: `Bearer ${session.access_token}` } : undefined
+        })
+        if (r.ok) {
+          const d = await r.json()
+          setQueueMeta({
+            taskId: d.taskId,
+            status: d.status,
+            attempts: d.attempts,
+            errorMessage: d.errorMessage,
+            createdAt: d.createdAt,
+            startedAt: d.startedAt,
+            completedAt: d.completedAt,
+          })
+        } else {
+          setQueueMeta(null)
+        }
+      } catch {
+        setQueueMeta(null)
+      }
+    }
+    // Charger si on a une erreur ou pendant un retry/pending
+    if (invoice?.status === 'error' || invoice?.status === 'processing') {
+      loadQueueMeta()
+    }
+  }, [invoice?.id, invoice?.status])
+
+  // Charger des factures candidates si doublon détecté (sans dépendances non initialisées)
+  useEffect(() => {
+    const loadDuplicates = async () => {
+      try {
+        const invNumber = (invoice as any)?.extracted_data?.invoice_number
+        if (!invoice?.id || !invoice?.organization_id || !invNumber) {
+          setDuplicateCandidates([])
+          return
+        }
+        let query = (supabase
+          .from('invoices')
+          .select('id, file_name, created_at, status, extracted_data')
+          .eq('organization_id', invoice.organization_id)
+          .neq('id', invoice.id)
+          .filter('extracted_data->>invoice_number', 'eq', String(invNumber)) as any)
+        if ((invoice as any)?.supplier_id) {
+          query = query.eq('supplier_id', (invoice as any).supplier_id)
+        }
+        const { data } = await (query
+          .order('created_at', { ascending: false })
+          .limit(5) as any)
+        setDuplicateCandidates((data || []) as any[])
+      } catch {
+        setDuplicateCandidates([])
+      }
+    }
+    const dup = (invoice?.status === 'duplicate')
+      || String(queueMeta?.errorMessage || '').includes('duplicate_invoice_number')
+      || String((invoice as any)?.extracted_data?.error || '').toLowerCase().includes('duplicate')
+    if (dup) {
+      loadDuplicates()
+    }
+  }, [invoice?.status, queueMeta?.errorMessage, invoice?.id, invoice?.organization_id, (invoice as any)?.extracted_data?.invoice_number])
 
   // Navigation clavier ← →
   useEffect(() => {
@@ -568,6 +640,58 @@ export default function InvoiceEditPage() {
   }
 
   const extracted: any = invoice?.extracted_data || {}
+  const errorMessage: string = (() => {
+    const err = extracted?.error
+    if (!err) return ''
+    return typeof err === 'string' ? err : JSON.stringify(err)
+  })()
+  const isDuplicate = (invoice?.status === 'duplicate')
+    || (queueMeta?.errorMessage || '').includes('duplicate_invoice_number')
+    || (errorMessage || '').toLowerCase().includes('duplicate')
+
+  const formatBytes = (n?: number) => {
+    const b = Number(n || 0)
+    if (!b) return '—'
+    const u = ['o', 'Ko', 'Mo', 'Go']
+    let i = 0
+    let v = b
+    while (v >= 1024 && i < u.length - 1) {
+      v = v / 1024
+      i++
+    }
+    return `${v.toFixed(1)} ${u[i]}`
+  }
+
+  const friendlyHelp = (() => {
+    const tips: string[] = []
+    const em = (errorMessage || queueMeta?.errorMessage || '').toLowerCase()
+    const mime = String(invoice?.mime_type || '')
+    const size = Number(invoice?.file_size || 0)
+
+    let headline = "Le document n'a pas pu être traité"
+
+    if (em.includes('duplicate_invoice_number') || em.includes('duplicate')) {
+      headline = 'Doublon détecté'
+      tips.push('Cette facture semble déjà exister avec le même numéro. Vérifiez la liste des factures.')
+    }
+    if (em.includes('unsupported') || em.includes('mime') || (!mime.match(/^application\/pdf|^image\//))) {
+      headline = 'Format non supporté'
+      tips.push(`Le format de fichier (${mime || 'inconnu'}) peut ne pas être supporté. Convertissez en PDF ou image (JPG/PNG).`)
+    }
+    if (em.includes('timeout') || em.includes('timed out')) {
+      tips.push('Le traitement a expiré. Réessayez: le serveur était peut‑être occupé.')
+    }
+    if (em.includes('ocr') || em.includes('tesseract') || em.includes('no text') || em.includes('text') && em.includes('extract')) {
+      tips.push('Le texte est difficile à lire. Préférez un PDF natif ou un scan 300 dpi en niveaux de gris, bien cadré.')
+    }
+    if (size > 20 * 1024 * 1024 || em.includes('too large') || em.includes('payload')) {
+      tips.push(`Le fichier est volumineux (${formatBytes(size)}). Compressez ou scindez le document avant de réessayer.`)
+    }
+    if (tips.length === 0) {
+      tips.push('Réessayez la relance. Si le problème persiste, vérifiez la lisibilité et le format du fichier.')
+    }
+    return { headline, tips }
+  })()
   const documentMeta = getDocumentTypeMeta(invoice?.document_type ?? extracted.document_type)
   const DocumentIcon = documentMeta.icon
   const documentTypeKey = documentMeta.key
@@ -677,6 +801,237 @@ export default function InvoiceEditPage() {
           <div className="mb-4 p-3 rounded bg-red-50 text-red-700 text-sm">{error}</div>
         )}
 
+        {(invoice?.status === 'error' || isDuplicate) && (
+          <div className="mb-6 bg-red-50 border-l-4 border-red-500 rounded-lg shadow-md p-5">
+            <div className="flex items-start justify-between gap-4">
+              <div className="flex-1">
+                <h3 className="text-sm font-bold text-red-900 mb-1">{friendlyHelp.headline}</h3>
+                <p className="text-sm text-red-800">La dernière tentative d'extraction a échoué.</p>
+                <div className="mt-2 text-xs text-red-900">
+                  <ul className="list-disc pl-5 space-y-1">
+                    {friendlyHelp.tips.map((t, i) => (
+                      <li key={i}>{t}</li>
+                    ))}
+                  </ul>
+                </div>
+                <div className="mt-3 text-[11px] text-gray-600">
+                  <span className="mr-2">Fichier: <span className="font-mono">{invoice?.file_name || '—'}</span></span>
+                  <span className="mr-2">Type: {invoice?.mime_type || '—'}</span>
+                  <span>Taille: {formatBytes(invoice?.file_size)}</span>
+                </div>
+                {isDuplicate && duplicateCandidates.length > 0 && (
+                  <div className="mt-4 bg-white border border-amber-200 rounded p-3 text-xs">
+                    <div className="font-semibold text-amber-800 mb-2">Facture(s) existante(s) avec le même numéro</div>
+                    <div className="space-y-2">
+                      {duplicateCandidates.map((d) => (
+                        <div key={d.id} className="flex items-center justify-between gap-2 border border-amber-100 rounded px-2 py-1">
+                          <div className="min-w-0">
+                            <div className="text-gray-900 truncate">{d.file_name || 'Facture'}</div>
+                            <div className="text-[11px] text-gray-500">
+                              N°: {String(d?.extracted_data?.invoice_number || '')} • {formatShortDate(d.created_at)} • Statut: {d.status}
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-2 shrink-0">
+                            <button
+                              className="text-xs px-2 py-1 border rounded hover:bg-gray-50"
+                              onClick={() => router.push(`/invoices/${d.id}`)}
+                            >Ouvrir</button>
+                            <button
+                              className="text-xs px-2 py-1 border rounded hover:bg-gray-50"
+                              onClick={() => {
+                                setIsEditingProps(true)
+                                setTimeout(() => propsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 0)
+                              }}
+                            >Éditer le N° ici</button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                {showErrorDetails && errorMessage && (
+                  <div className="mt-3 bg-white border border-red-200 rounded p-3 text-xs text-red-900 whitespace-pre-wrap">
+                    {errorMessage}
+                  </div>
+                )}
+                {showErrorDetails && (
+                  <div className="mt-3 bg-white border border-gray-200 rounded p-3 text-xs text-gray-800">
+                    <div className="grid grid-cols-2 gap-2">
+                      <div>
+                        <div className="text-gray-500">Statut de la queue</div>
+                        <div className="font-medium">{queueMeta?.status || '—'}</div>
+                      </div>
+                      <div>
+                        <div className="text-gray-500">Tentatives</div>
+                        <div className="font-medium">{queueMeta?.attempts ?? '—'}</div>
+                      </div>
+                      <div>
+                        <div className="text-gray-500">Créée</div>
+                        <div className="font-medium">{queueMeta?.createdAt ? formatShortDate(queueMeta.createdAt) : '—'}</div>
+                      </div>
+                      <div>
+                        <div className="text-gray-500">Démarrée</div>
+                        <div className="font-medium">{queueMeta?.startedAt ? formatShortDate(queueMeta.startedAt) : '—'}</div>
+                      </div>
+                      <div>
+                        <div className="text-gray-500">Terminée</div>
+                        <div className="font-medium">{queueMeta?.completedAt ? formatShortDate(queueMeta.completedAt) : '—'}</div>
+                      </div>
+                      <div>
+                        <div className="text-gray-500">Task ID</div>
+                        <div className="font-mono break-all text-[11px]">{queueMeta?.taskId || '—'}</div>
+                      </div>
+                    </div>
+                    {queueMeta?.errorMessage && (
+                      <div className="mt-3">
+                        <div className="text-gray-500 mb-1">Erreur renvoyée par le worker</div>
+                        <div className="bg-red-50 border border-red-200 rounded p-2 text-red-900 whitespace-pre-wrap">
+                          {queueMeta.errorMessage}
+                        </div>
+                        <div className="mt-2 flex gap-2">
+                          <button 
+                            className="text-xs px-2 py-1 border rounded hover:bg-gray-50"
+                            onClick={() => navigator.clipboard.writeText(queueMeta.errorMessage || '')}
+                          >Copier l'erreur</button>
+                          {errorMessage && (
+                            <button 
+                              className="text-xs px-2 py-1 border rounded hover:bg-gray-50"
+                              onClick={() => navigator.clipboard.writeText(errorMessage)}
+                            >Copier le détail</button>
+                          )}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+              <div className="flex items-center gap-2">
+                {isDuplicate && (
+                  <Button 
+                    size="sm" 
+                    variant="outline"
+                    className="border-amber-300 text-amber-800 hover:bg-amber-100"
+                    onClick={() => {
+                      setIsEditingProps(true)
+                      setTimeout(() => propsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 0)
+                    }}
+                  >
+                    Modifier le N°
+                  </Button>
+                )}
+                {pdfUrl && (
+                  <a 
+                    href={pdfUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="text-xs px-2 py-1 border rounded hover:bg-gray-50"
+                  >
+                    Télécharger
+                  </a>
+                )}
+                {errorMessage && (
+                  <Button 
+                    size="sm" 
+                    variant="outline"
+                    className="border-red-300 text-red-800 hover:bg-red-100"
+                    onClick={() => setShowErrorDetails(v => !v)}
+                  >
+                    {showErrorDetails ? 'Masquer le détail' : 'Voir le détail'}
+                  </Button>
+                )}
+                <Button 
+                  size="sm"
+                  variant="outline"
+                  className="border-gray-300 text-gray-700 hover:bg-gray-100"
+                  onClick={async () => {
+                    if (!confirm('Supprimer définitivement cette facture ?')) return
+                    try {
+                      const { data: { session } } = await supabase.auth.getSession()
+                      const res = await fetch(`/api/invoices/${params.id}`, {
+                        method: 'DELETE',
+                        headers: session?.access_token ? { Authorization: `Bearer ${session.access_token}` } : undefined
+                      })
+                      if (!res.ok) {
+                        const d = await res.json().catch(() => ({}))
+                        throw new Error(d.error || 'Suppression impossible')
+                      }
+                      router.push('/invoices')
+                    } catch (e: any) {
+                      setError(e.message)
+                    }
+                  }}
+                >
+                  Supprimer
+                </Button>
+                <Button 
+                  size="sm"
+                  className="bg-blue-600 hover:bg-blue-700 text-white"
+                  disabled={retrying}
+                  onClick={async () => {
+                    try {
+                      setRetrying(true)
+                      setError(null)
+                      const { data: { session } } = await supabase.auth.getSession()
+                      const res = await fetch('/api/queue/add', {
+                        method: 'POST',
+                        headers: {
+                          'Content-Type': 'application/json',
+                          ...(session?.access_token ? { Authorization: `Bearer ${session.access_token}` } : {})
+                        },
+                        body: JSON.stringify({ invoiceId: params.id })
+                      })
+                      const data = await res.json()
+                      if (!res.ok) throw new Error(data.error || 'Échec de la relance')
+
+                      // Refléter localement: en file d'attente
+                      setInvoice((prev: any) => prev ? { ...prev, status: 'queued' } : prev)
+
+                      // Démarrer un petit polling pour mettre à jour l'état
+                      const token = session?.access_token || ''
+                      let attempts = 0
+                      const maxAttempts = 60
+                      const poll = async () => {
+                        if (attempts++ >= maxAttempts) return
+                        try {
+                          const r = await fetch(`/api/queue/status?invoiceId=${params.id}`, {
+                            headers: token ? { Authorization: `Bearer ${token}` } as any : undefined
+                          })
+                          if (r.ok) {
+                            const s = await r.json()
+                            if (s.status === 'completed') {
+                              try {
+                                const rr = await fetch(`/api/invoices/${params.id}`, { headers: token ? { Authorization: `Bearer ${token}` } : undefined })
+                                const dd = await rr.json()
+                                if (rr.ok) {
+                                  setInvoice(dd.invoice)
+                                }
+                              } catch {}
+                              return
+                            } else if (s.status === 'failed' || s.status === 'error') {
+                              setInvoice((prev: any) => prev ? { ...prev, status: 'error' } : prev)
+                              return
+                            } else if (s.status === 'processing') {
+                              setInvoice((prev: any) => prev ? { ...prev, status: 'processing' } : prev)
+                            }
+                          }
+                        } catch {}
+                        setTimeout(poll, 4000)
+                      }
+                      poll()
+                    } catch (e: any) {
+                      setError(e.message)
+                    } finally {
+                      setRetrying(false)
+                    }
+                  }}
+                >
+                  {retrying ? 'Relance…' : "Relancer l'extraction"}
+                </Button>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* Banner d'alerte si le fournisseur est en attente de validation */}
         {supplierValidationStatus === 'pending' && (
           <div className="mb-6 bg-gradient-to-r from-yellow-50 to-orange-50 border-l-4 border-yellow-500 rounded-lg shadow-md p-5">
@@ -720,7 +1075,7 @@ export default function InvoiceEditPage() {
 
         <div className="flex gap-0 relative min-w-0">
           <div className="space-y-4 min-w-0" style={{ width: showPreview ? `${100 - previewWidth}%` : '100%', transition: isResizing ? 'none' : 'width 0.3s', paddingRight: showPreview ? '12px' : '0' }}>
-            <div className={`shadow rounded p-4 ${supplierValidationStatus === 'pending' ? 'bg-gradient-to-r from-yellow-50 to-orange-50 border-l-4 border-yellow-500' : 'bg-white'}`}>
+            <div ref={propsRef} className={`shadow rounded p-4 ${supplierValidationStatus === 'pending' ? 'bg-gradient-to-r from-yellow-50 to-orange-50 border-l-4 border-yellow-500' : 'bg-white'}`}>
               <div className="flex items-center justify-between mb-3">
                 <h2 className="text-sm font-semibold text-gray-900">Propriétés</h2>
                 <Button size="sm" variant="outline" onClick={async () => {

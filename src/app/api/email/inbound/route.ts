@@ -298,7 +298,7 @@ export async function POST(request: NextRequest) {
             file_path: path,
             file_size: buffer.length,
             mime_type: contentType,
-            status: 'pending'
+            status: 'queued'
           } as any)
           .select()
           .single()

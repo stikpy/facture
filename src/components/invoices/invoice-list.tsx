@@ -117,7 +117,13 @@ export function InvoiceList({ from, to }: { from?: string; to?: string }) {
         .order('created_at', { ascending: false })
 
       if (filter !== 'all') {
-        query = query.eq('status', filter)
+        if (filter === 'processing') {
+          query = query.in('status', ['processing', 'queued'] as any)
+        } else if (filter === 'error') {
+          query = query.in('status', ['error', 'duplicate', 'awaiting_user'] as any)
+        } else {
+          query = query.eq('status', filter)
+        }
       }
 
       if (orgId) {
@@ -248,22 +254,28 @@ export function InvoiceList({ from, to }: { from?: string; to?: string }) {
 
   const getStatusBadge = (status: string) => {
     const styles = {
-      pending: 'bg-yellow-100 text-yellow-800',
+      pending: 'bg-gray-100 text-gray-700',
+      queued: 'bg-blue-50 text-blue-700 border border-blue-200',
       processing: 'bg-blue-100 text-blue-800',
       completed: 'bg-green-100 text-green-800',
-      error: 'bg-red-100 text-red-800'
-    }
+      error: 'bg-red-100 text-red-800',
+      duplicate: 'bg-amber-100 text-amber-800 border border-amber-300',
+      awaiting_user: 'bg-yellow-100 text-yellow-800 border border-yellow-300'
+    } as any
 
     const labels = {
       pending: 'En attente',
+      queued: 'En file',
       processing: 'En cours',
       completed: 'Terminé',
-      error: 'Erreur'
-    }
+      error: 'Erreur',
+      duplicate: 'Doublon',
+      awaiting_user: 'Action requise'
+    } as any
 
     return (
-      <span className={`px-2 py-1 text-xs font-medium rounded-full ${styles[status as keyof typeof styles]}`}>
-        {labels[status as keyof typeof labels]}
+      <span className={`px-2 py-1 text-xs font-medium rounded-full ${styles[status] || 'bg-gray-100 text-gray-700'}`}>
+        {labels[status] || status}
       </span>
     )
   }
@@ -274,8 +286,13 @@ export function InvoiceList({ from, to }: { from?: string; to?: string }) {
         return <CheckCircle2 className="h-4 w-4 text-green-600" />
       case 'processing':
         return <Clock3 className="h-4 w-4 text-blue-600" />
+      case 'queued':
+        return <Clock3 className="h-4 w-4 text-blue-400" />
       case 'error':
         return <TriangleAlert className="h-4 w-4 text-red-600" />
+      case 'duplicate':
+      case 'awaiting_user':
+        return <TriangleAlert className="h-4 w-4 text-amber-600" />
       default:
         return <Clock3 className="h-4 w-4 text-gray-400" />
     }

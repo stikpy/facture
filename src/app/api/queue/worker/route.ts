@@ -429,7 +429,8 @@ export async function GET(request: NextRequest) {
           .eq('id', (task as any).invoice_id)
         if (error) {
           // Gère les doublons de numéro de facture (contrainte unique côté BDD)
-          if ((error as any).code === '23505' || String(error.message || '').includes('uniq_invoice_per_user_number')) {
+          const msg = String((error as any).message || '')
+          if ((error as any).code === '23505' || msg.includes('uniq_invoice_per_user_number') || msg.includes('uniq_invoice_per_org_supplier_number')) {
             console.warn('⚠️ [WORKER] Doublon numéro de facture détecté, marquage en erreur')
             await (supabaseAdmin as any)
               .from('invoices')

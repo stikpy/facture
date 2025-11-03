@@ -70,7 +70,7 @@ export async function GET(request: NextRequest) {
           .eq('id', invoiceId)
           .single()
         const current = (inv as any)?.status
-        if (current === 'processing') {
+        if (current === 'processing' || current === 'queued') {
           let newStatus = (task as any).status === 'completed' ? 'completed' : 'error'
           const msg = String((task as any).error_message || '')
           if (msg.includes('duplicate_invoice_number')) newStatus = 'duplicate'

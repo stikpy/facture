@@ -254,3 +254,91 @@ export async function PUT(
 }
 
 
+export async function DELETE(
+  request: NextRequest,
+  context: { params: Promise<{ id: string }> }
+) {
+  try {
+    const supabase = await createClient()
+    await supabase.auth.getSession()
+    let { data: { user }, error: authError } = await supabase.auth.getUser()
+    if (!user) {
+      const authHeader = request.headers.get('authorization')
+      if (authHeader) {
+        const token = authHeader.replace('Bearer ', '')
+        const authRes = await supabase.auth.getUser(token)
+        user = authRes.data.user
+        authError = authRes.error
+      }
+    }
+    if (authError || !user) {
+      return NextResponse.json({ error: 'Non authentifié' }, { status: 401 })
+    }
+
+    const { id: invoiceId } = await context.params
+
+    // Charger la facture et vérifier l'appartenance (orga)
+    const { data: invoice, error: invErr } = await (supabaseAdmin
+      .from('invoices')
+      .select('*')
+      .eq('id', invoiceId)
+      .single() as any)
+
+    if (invErr || !invoice) {
+      return NextResponse.json({ error: 'Facture introuvable' }, { status: 404 })
+    }
+
+    if ((invoice as any).organization_id) {
+      const { data: memberships } = await (supabaseAdmin as any)
+        .from('organization_members')
+        .select('organization_id')
+        .eq('user_id', user.id)
+      const orgIds = ((memberships as any[]) || []).map(m => m.organization_id)
+      if (!orgIds.includes((invoice as any).organization_id)) {
+        return NextResponse.json({ error: 'Accès interdit' }, { status: 403 })
+      }
+    }
+
+    // Supprimer les allocations liées à l'utilisateur
+    try {
+      await (supabaseAdmin as any)
+        .from('invoice_allocations')
+        .delete()
+        .eq('invoice_id', invoiceId)
+        .eq('user_id', user.id)
+    } catch {}
+
+    // Supprimer les tâches de queue
+    try {
+      await (supabaseAdmin as any)
+        .from('processing_queue')
+        .delete()
+        .eq('invoice_id', invoiceId)
+        .eq('user_id', user.id)
+    } catch {}
+
+    // Supprimer le fichier de storage si présent
+    try {
+      const filePath = (invoice as any).file_path
+      if (filePath) {
+        const { storage: adminStorage } = supabaseAdmin as any
+        await adminStorage.from('invoices').remove([filePath])
+      }
+    } catch {}
+
+    // Supprimer la facture
+    const { error: delErr } = await (supabaseAdmin as any)
+      .from('invoices')
+      .delete()
+      .eq('id', invoiceId)
+
+    if (delErr) {
+      return NextResponse.json({ error: delErr.message }, { status: 500 })
+    }
+
+    return NextResponse.json({ success: true })
+  } catch (e: any) {
+    return NextResponse.json({ error: e.message || 'Erreur serveur' }, { status: 500 })
+  }
+}
+
