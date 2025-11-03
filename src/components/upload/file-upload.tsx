@@ -1,11 +1,11 @@
 'use client'
 
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useRef, type ChangeEvent } from 'react'
 import { useDropzone } from 'react-dropzone'
 import { createClient } from '@/utils/supabase/client'
 import { Button } from '@/components/ui/button'
 import { LoadingSpinner } from '@/components/ui/loading-spinner'
-import { Upload, FileText, CheckCircle, AlertCircle } from 'lucide-react'
+import { Upload, FileText, CheckCircle, AlertCircle, Camera } from 'lucide-react'
 import { formatFileSize } from '@/lib/utils'
 
 interface UploadedFile {
@@ -19,8 +19,9 @@ interface UploadedFile {
 export function FileUpload() {
   const [files, setFiles] = useState<UploadedFile[]>([])
   const [isUploading, setIsUploading] = useState(false)
+  const cameraInputRef = useRef<HTMLInputElement | null>(null)
 
-  const onDrop = useCallback(async (acceptedFiles: File[]) => {
+  const processFiles = useCallback(async (acceptedFiles: File[]) => {
     console.log('🎯 [CLIENT] ===== FONCTION onDrop APPELÉE =====')
     console.log('🎯 [CLIENT] Nombre de fichiers:', acceptedFiles.length)
     console.log('🚀 [CLIENT] Début du processus d\'upload:', acceptedFiles.map(f => ({ name: f.name, size: f.size, type: f.type })))
@@ -61,6 +62,20 @@ export function FileUpload() {
     console.log('🏁 [CLIENT] Upload + traitements déclenchés')
     setIsUploading(false)
   }, [])
+
+  const handleCameraChange = useCallback(async (event: ChangeEvent<HTMLInputElement>) => {
+    const selectedFiles = event.target.files ? Array.from(event.target.files) : []
+
+    if (selectedFiles.length > 0) {
+      await processFiles(selectedFiles)
+    }
+
+    event.target.value = ''
+  }, [processFiles])
+
+  const handleCameraClick = () => {
+    cameraInputRef.current?.click()
+  }
 
   // Étape 1: uploader seulement et retourner l'id de facture
   const uploadOnly = async (fileData: UploadedFile): Promise<string> => {
@@ -236,7 +251,7 @@ export function FileUpload() {
   }
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
-    onDrop,
+    onDrop: processFiles,
     accept: {
       'application/pdf': ['.pdf'],
       'image/jpeg': ['.jpg', '.jpeg'],
@@ -300,6 +315,31 @@ export function FileUpload() {
             PDF, JPG, PNG, TIFF (max 10MB)
           </p>
         </div>
+      </div>
+
+      <input
+        ref={cameraInputRef}
+        type="file"
+        accept="image/*"
+        capture="environment"
+        className="hidden"
+        onChange={handleCameraChange}
+      />
+
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-center gap-3">
+        <Button
+          type="button"
+          variant="secondary"
+          className="w-full sm:w-auto"
+          onClick={handleCameraClick}
+          disabled={isUploading}
+        >
+          <Camera className="mr-2 h-4 w-4" />
+          Prendre une photo
+        </Button>
+        <p className="text-xs text-gray-500 sm:text-sm">
+          Utilisez l'appareil photo de votre mobile pour capturer un document et l'importer immédiatement.
+        </p>
       </div>
 
       {/* Liste des fichiers */}
