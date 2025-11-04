@@ -123,6 +123,7 @@ export default function InvoiceEditPage() {
   const [taxAmount, setTaxAmount] = useState<string>('')
   const [totalAmount, setTotalAmount] = useState<string>('')
   const [retrying, setRetrying] = useState(false)
+  const [refreshing, setRefreshing] = useState(false)
   const [showErrorDetails, setShowErrorDetails] = useState(false)
   const [queueMeta, setQueueMeta] = useState<{ taskId?: string, status?: string, attempts?: number, errorMessage?: string, createdAt?: string, startedAt?: string, completedAt?: string } | null>(null)
   const [duplicateCandidates, setDuplicateCandidates] = useState<any[]>([])
@@ -927,6 +928,39 @@ export default function InvoiceEditPage() {
                 )}
               </div>
               <div className="flex items-center gap-2">
+                <Button 
+                  size="sm" 
+                  variant="outline"
+                  className="border-gray-300 text-gray-700 hover:bg-gray-100"
+                  disabled={refreshing}
+                  onClick={async () => {
+                    try {
+                      setRefreshing(true)
+                      const { data: { session } } = await supabase.auth.getSession()
+                      const token = session?.access_token || ''
+                      // Tenter une réconciliation via l'endpoint de statut
+                      try {
+                        await fetch(`/api/queue/status?invoiceId=${params.id}`, {
+                          headers: token ? { Authorization: `Bearer ${token}` } as any : undefined
+                        })
+                      } catch {}
+                      // Recharger la facture
+                      const rr = await fetch(`/api/invoices/${params.id}`, { headers: token ? { Authorization: `Bearer ${token}` } : undefined })
+                      const dd = await rr.json()
+                      if (rr.ok) {
+                        setInvoice(dd.invoice)
+                      } else if (dd?.error) {
+                        setError(dd.error)
+                      }
+                    } catch (e: any) {
+                      setError(e.message)
+                    } finally {
+                      setRefreshing(false)
+                    }
+                  }}
+                >
+                  {refreshing ? 'Actualisation…' : 'Actualiser le statut'}
+                </Button>
                 {(errorMessage.toLowerCase().includes('ocr') || String(queueMeta?.errorMessage || '').toLowerCase().includes('ocr')) && (
                   <Button 
                     size="sm" 
