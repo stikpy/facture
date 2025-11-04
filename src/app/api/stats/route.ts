@@ -68,6 +68,17 @@ export async function GET(request: NextRequest) {
 
     const rows = (data as any[]) || []
 
+    // Précharger les métadonnées fournisseurs pour filtrage et regroupement
+    let supplierMetaMap = new Map<string, { code?: string; name: string; normalized?: string }>()
+    {
+      const { data: supplierRows } = await (supabaseAdmin as any)
+        .from('suppliers')
+        .select('id, code, display_name, normalized_key')
+      for (const s of (supplierRows as any[]) || []) {
+        supplierMetaMap.set(String((s as any).id), { code: (s as any).code, name: (s as any).display_name, normalized: (s as any).normalized_key })
+      }
+    }
+
     // Helpers
     const toNum = (n: any): number => (typeof n === 'number' ? n : 0)
     const yyyy_mm = (d: string) => {
@@ -97,8 +108,11 @@ export async function GET(request: NextRequest) {
         if (created > t) return false
       }
       if (supplier) {
-        const s = String(ed.supplier_name || '').toLowerCase()
-        if (!s.includes(supplier)) return false
+        const s1 = String(ed.supplier_name || '').toLowerCase()
+        const s2 = (() => {
+          try { return String((supplierMetaMap.get(String(r.supplier_id))?.name || '')).toLowerCase() } catch { return '' }
+        })()
+        if (!(s1.includes(supplier) || s2.includes(supplier))) return false
       }
       if (status && String(r.status || '').toLowerCase() !== status) return false
       const amount = toNum(ed.total_amount)
@@ -156,16 +170,7 @@ export async function GET(request: NextRequest) {
         .trim()
     }
 
-    // Charger toutes les métadonnées fournisseurs (pour faire correspondre les noms libres aux fiches)
-    let supplierMetaMap = new Map<string, { code?: string; name: string; normalized?: string }>()
-    {
-      const { data: supplierRows } = await (supabaseAdmin as any)
-        .from('suppliers')
-        .select('id, code, display_name, normalized_key')
-      for (const s of (supplierRows as any[]) || []) {
-        supplierMetaMap.set(String((s as any).id), { code: (s as any).code, name: (s as any).display_name, normalized: (s as any).normalized_key })
-      }
-    }
+    // supplierMetaMap déjà chargé ci-dessus
 
     for (const r of filtered as any[]) {
       const ed = r.extracted_data || {}
