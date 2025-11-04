@@ -9,7 +9,18 @@ export async function GET(request: NextRequest) {
     if (error || !user) return NextResponse.json({ error: 'Non authentifié' }, { status: 401 })
 
     // Récupérer l'organisation active depuis le metadata utilisateur
-    const activeOrgId = (user as any)?.user_metadata?.organization_id
+    const { searchParams } = new URL(request.url)
+    let activeOrgId = searchParams.get('organization_id') || (user as any)?.user_metadata?.organization_id
+    if (!activeOrgId) {
+      // fallback: première organisation du user
+      const { data: m } = await (supabaseAdmin as any)
+        .from('organization_members')
+        .select('organization_id')
+        .eq('user_id', user.id)
+        .limit(1)
+        .single()
+      activeOrgId = (m as any)?.organization_id || null
+    }
     if (!activeOrgId) return NextResponse.json({ accounts: [] })
 
     const { data, error: qErr } = await (supabaseAdmin as any)
@@ -33,10 +44,24 @@ export async function POST(request: NextRequest) {
     const body = await request.json()
     const code = String(body?.code || '').trim()
     const label = String(body?.label || '').trim()
-    const synonyms = Array.isArray(body?.synonyms) ? body.synonyms.map((s: any) => String(s)) : []
+    const synonyms = Array.isArray(body?.synonyms)
+      ? body.synonyms.map((s: any) => String(s))
+      : String(body?.synonyms || '')
+          .split(',')
+          .map((s: string) => s.trim())
+          .filter(Boolean)
     if (!code || !label) return NextResponse.json({ error: 'Code et libellé requis' }, { status: 400 })
 
-    const activeOrgId = (user as any)?.user_metadata?.organization_id
+    let activeOrgId = String(body?.organization_id || '') || (user as any)?.user_metadata?.organization_id
+    if (!activeOrgId) {
+      const { data: m } = await (supabaseAdmin as any)
+        .from('organization_members')
+        .select('organization_id')
+        .eq('user_id', user.id)
+        .limit(1)
+        .single()
+      activeOrgId = (m as any)?.organization_id || ''
+    }
     if (!activeOrgId) return NextResponse.json({ error: 'Organisation active manquante' }, { status: 400 })
 
     const { data, error: upErr } = await (supabaseAdmin as any)
