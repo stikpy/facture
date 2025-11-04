@@ -119,7 +119,7 @@ export async function PUT(
     const { id: invoiceId } = await context.params
     const body = await request.json()
     const { supplier_name, supplier_id, description, allocations,
-      client_name, invoice_number, invoice_date, due_date, subtotal, tax_amount, total_amount } = body || {}
+      client_name, invoice_number, invoice_date, due_date, subtotal, tax_amount, total_amount, manual_mode } = body || {}
     
     console.log('🔍 [API] === DÉBUT PUT /api/invoices/' + invoiceId + ' ===')
     console.log('🔍 [API] Body reçu:', JSON.stringify(body, null, 2))
@@ -162,10 +162,12 @@ export async function PUT(
       ...(subtotal !== undefined ? { subtotal } : {}),
       ...(tax_amount !== undefined ? { tax_amount } : {}),
       ...(total_amount !== undefined ? { total_amount } : {}),
+      ...(manual_mode === true ? { ocr_mode: 'manual' } : {}),
     }
 
     const updatePayload: any = { extracted_data: updatedExtracted }
     if (supplier_id) updatePayload.supplier_id = supplier_id
+    if (manual_mode === true) updatePayload.status = 'awaiting_user'
     const { error: upErr } = await ((supabaseAdmin as any)
       .from('invoices')
       .update(updatePayload as any)

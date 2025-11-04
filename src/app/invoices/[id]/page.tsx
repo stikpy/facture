@@ -441,8 +441,7 @@ export default function InvoiceEditPage() {
   // Sauvegarde automatique des propriétés
   const saveProperties = async () => {
     try {
-      if (!supplierId) return // Pas de sauvegarde si pas de fournisseur sélectionné
-      
+      // Autoriser la sauvegarde même sans supplierId pour saisie manuelle
       const { data: { session } } = await supabase.auth.getSession()
       const response = await fetch(`/api/invoices/${params.id}`, {
         method: 'PUT',
@@ -906,6 +905,34 @@ export default function InvoiceEditPage() {
                 )}
               </div>
               <div className="flex items-center gap-2">
+                {(errorMessage.toLowerCase().includes('ocr') || String(queueMeta?.errorMessage || '').toLowerCase().includes('ocr')) && (
+                  <Button 
+                    size="sm" 
+                    variant="outline"
+                    className="border-yellow-300 text-yellow-800 hover:bg-yellow-100"
+                    onClick={async () => {
+                      try {
+                        const { data: { session } } = await supabase.auth.getSession()
+                        const res = await fetch(`/api/invoices/${params.id}`, {
+                          method: 'PUT',
+                          headers: {
+                            'Content-Type': 'application/json',
+                            ...(session?.access_token ? { Authorization: `Bearer ${session.access_token}` } : {})
+                          },
+                          body: JSON.stringify({ manual_mode: true })
+                        })
+                        const j = await res.json().catch(() => ({}))
+                        if (!res.ok) throw new Error(j.error || 'Activation du mode manuel impossible')
+                        // Mettre à jour localement
+                        setInvoice((prev: any) => prev ? { ...prev, status: 'awaiting_user', extracted_data: { ...(prev.extracted_data||{}), ocr_mode: 'manual' } } : prev)
+                      } catch (e: any) {
+                        setError(e.message)
+                      }
+                    }}
+                  >
+                    Basculer en saisie manuelle
+                  </Button>
+                )}
                 {isDuplicate && (
                   <Button 
                     size="sm" 
