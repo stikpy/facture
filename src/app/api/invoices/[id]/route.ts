@@ -177,6 +177,17 @@ export async function PUT(
       return NextResponse.json({ error: upErr.message }, { status: 500 })
     }
 
+    // Si on bascule en mode manuel, supprimer les tâches de queue en attente pour éviter un retraitement
+    if (manual_mode === true) {
+      try {
+        await (supabaseAdmin as any)
+          .from('processing_queue')
+          .delete()
+          .eq('invoice_id', invoiceId)
+          .in('status', ['pending', 'processing'])
+      } catch {}
+    }
+
     // 4) Si on a choisi un supplier_id et un supplier_name brut, enregistrer l'alias pour les prochaines reconnaissances
     try {
       if (supplier_id && supplier_name) {

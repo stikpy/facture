@@ -479,6 +479,8 @@ export default function InvoiceEditPage() {
           subtotal: subtotal !== '' ? Number(subtotal) : undefined,
           tax_amount: taxAmount !== '' ? Number(taxAmount) : undefined,
           total_amount: totalAmount !== '' ? Number(totalAmount) : undefined,
+          // Dès que l'utilisateur enregistre des propriétés, considérer la saisie manuelle
+          manual_mode: true,
         }),
       })
       
@@ -498,7 +500,9 @@ export default function InvoiceEditPage() {
             total_amount: totalAmount !== '' ? Number(totalAmount) : prev?.extracted_data?.total_amount,
           }
         }))
-        console.log('✅ Propriétés sauvegardées et affichage mis à jour')
+        // passer en awaiting_user côté UI (mode manuel)
+        setInvoice((prev: any) => prev ? { ...prev, status: 'awaiting_user', extracted_data: { ...(prev.extracted_data||{}), ocr_mode: 'manual' } } : prev)
+        console.log('✅ Propriétés sauvegardées (mode manuel) et affichage mis à jour')
       }
     } catch (e) {
       console.error('Erreur sauvegarde automatique:', e)
