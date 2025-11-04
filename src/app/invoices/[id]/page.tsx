@@ -115,6 +115,7 @@ export default function InvoiceEditPage() {
   const [previewWidth, setPreviewWidth] = useState(33.33) // % de la largeur
   const [isResizing, setIsResizing] = useState(false)
   const [isEditingProps, setIsEditingProps] = useState(false)
+  const [finalizing, setFinalizing] = useState(false)
   const [clientName, setClientName] = useState('')
   const [invoiceNumber, setInvoiceNumber] = useState('')
   const [docDate, setDocDate] = useState('')
@@ -1161,6 +1162,37 @@ export default function InvoiceEditPage() {
             <div ref={propsRef} className={`shadow rounded p-4 ${supplierValidationStatus === 'pending' ? 'bg-gradient-to-r from-yellow-50 to-orange-50 border-l-4 border-yellow-500' : 'bg-white'}`}>
               <div className="flex items-center justify-between mb-3">
                 <h2 className="text-sm font-semibold text-gray-900">Propriétés</h2>
+                <div className="flex items-center gap-2">
+                {invoice?.status === 'awaiting_user' && (
+                  <Button 
+                    size="sm" 
+                    className="bg-emerald-600 hover:bg-emerald-700 text-white"
+                    disabled={finalizing}
+                    onClick={async () => {
+                      try {
+                        setFinalizing(true)
+                        const { data: { session } } = await supabase.auth.getSession()
+                        const res = await fetch(`/api/invoices/${params.id}`, {
+                          method: 'PUT',
+                          headers: {
+                            'Content-Type': 'application/json',
+                            ...(session?.access_token ? { Authorization: `Bearer ${session.access_token}` } : {})
+                          },
+                          body: JSON.stringify({ finalize: true })
+                        })
+                        const j = await res.json().catch(() => ({}))
+                        if (!res.ok) throw new Error(j.error || 'Impossible de marquer comme terminée')
+                        setInvoice((prev: any) => prev ? { ...prev, status: 'completed' } : prev)
+                      } catch (e: any) {
+                        setError(e.message)
+                      } finally {
+                        setFinalizing(false)
+                      }
+                    }}
+                  >
+                    {finalizing ? 'Validation…' : 'Marquer comme terminée'}
+                  </Button>
+                )}
                 <Button size="sm" variant="outline" onClick={async () => {
                   if (isEditingProps) {
                     await saveProperties()
@@ -1169,6 +1201,7 @@ export default function InvoiceEditPage() {
                 }}>
                   {isEditingProps ? 'Terminer' : 'Modifier'}
                 </Button>
+                </div>
               </div>
               <div className="grid grid-cols-2 gap-3 text-xs">
                 <div>
