@@ -93,6 +93,7 @@ export default function InvoiceEditPage() {
   const [dropdownSearchTerm, setDropdownSearchTerm] = useState('')
   const [supplierCode, setSupplierCode] = useState('')
   const [supplierValidationStatus, setSupplierValidationStatus] = useState<string | null>(null)
+  const [orgAccounts, setOrgAccounts] = useState<Array<{ code: string; label: string }>>([])
 
   // Fonction pour uniformiser le texte (Title Case)
   const formatText = (text: string) => {
@@ -331,6 +332,20 @@ export default function InvoiceEditPage() {
     }
     fetchData()
   }, [params.id, router, ctxSupplierId])
+
+  // Charger les comptes de l'organisation pour enrichir la liste
+  useEffect(() => {
+    const loadOrgAccounts = async () => {
+      try {
+        const res = await fetch('/api/orgs/accounts')
+        const data = await res.json()
+        if (res.ok) {
+          setOrgAccounts((data.accounts || []).map((a: any) => ({ code: a.code, label: a.label })))
+        }
+      } catch {}
+    }
+    loadOrgAccounts()
+  }, [])
 
   // Charger / sauvegarder la rotation d'aperçu (par facture) en localStorage
   useEffect(() => {
@@ -1446,6 +1461,13 @@ export default function InvoiceEditPage() {
                           onChange={(e) => updateRow(idx, { account_code: e.target.value })}
                         >
                           <option value="" className="text-gray-400">Sélectionner un compte</option>
+                          {orgAccounts.length > 0 && (
+                            <optgroup label="Comptes organisation">
+                              {orgAccounts.map((a) => (
+                                <option key={`org-${a.code}`} value={a.code}>{a.code} - {a.label}</option>
+                              ))}
+                            </optgroup>
+                          )}
                           <optgroup label="Achats et approvisionnements">
                             <option value="601">601 - Matières premières</option>
                             <option value="602">602 - Autres approvisionnements</option>

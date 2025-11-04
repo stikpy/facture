@@ -11,6 +11,10 @@ export default function OrgAdminPage() {
   const [inviteEmail, setInviteEmail] = useState('')
   const [inboundAddress, setInboundAddress] = useState('')
   const [inboundList, setInboundList] = useState<Array<{full_address:string, created_at:string}>>([])
+  const [accounts, setAccounts] = useState<Array<{id:string, code:string, label:string, synonyms?:string[] }>>([])
+  const [newAccountCode, setNewAccountCode] = useState('')
+  const [newAccountLabel, setNewAccountLabel] = useState('')
+  const [newAccountSynonyms, setNewAccountSynonyms] = useState('')
 
   const load = async () => {
     setLoading(true)
@@ -21,6 +25,7 @@ export default function OrgAdminPage() {
       setActiveOrgId(data.activeOrganizationId || null)
     }
     await loadInboundAddresses()
+    await loadAccounts()
     await loadMembers()
     setLoading(false)
   }
@@ -45,6 +50,29 @@ export default function OrgAdminPage() {
       setInboundAddress('')
       await loadInboundAddresses()
     }
+  }
+
+  const loadAccounts = async () => {
+    const res = await fetch('/api/orgs/accounts')
+    const data = await res.json()
+    if (res.ok) setAccounts(data.accounts || [])
+  }
+
+  const addAccount = async () => {
+    const code = newAccountCode.trim()
+    const label = newAccountLabel.trim()
+    if (!code || !label) return
+    const synonyms = newAccountSynonyms.split(',').map(s=>s.trim()).filter(Boolean)
+    const res = await fetch('/api/orgs/accounts', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ code, label, synonyms }) })
+    if (res.ok) {
+      setNewAccountCode(''); setNewAccountLabel(''); setNewAccountSynonyms('')
+      await loadAccounts()
+    }
+  }
+
+  const removeAccount = async (code: string) => {
+    const res = await fetch(`/api/orgs/accounts?code=${encodeURIComponent(code)}`, { method: 'DELETE' })
+    if (res.ok) await loadAccounts()
   }
 
   const removeInbound = async (addr: string) => {
@@ -125,6 +153,37 @@ export default function OrgAdminPage() {
                     <button className="text-sm px-2 py-1 rounded border" onClick={()=>navigator.clipboard.writeText(e.full_address)}>Copier</button>
                     <button className="text-sm px-2 py-1 rounded border" onClick={()=>removeInbound(e.full_address)}>Supprimer</button>
                   </div>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      </section>
+
+      <section className="bg-white rounded border p-4">
+        <h2 className="font-medium mb-3">Comptes comptables (organisation)</h2>
+        <div className="text-sm text-gray-600 mb-2">Configurez vos comptes favoris. Ils apparaîtront dans la sélection des factures.</div>
+        <div className="flex flex-col sm:flex-row gap-2">
+          <input value={newAccountCode} onChange={(e)=>setNewAccountCode(e.target.value)} placeholder="Code (ex: 607)" className="border rounded px-2 py-1 w-32" />
+          <input value={newAccountLabel} onChange={(e)=>setNewAccountLabel(e.target.value)} placeholder="Libellé" className="border rounded px-2 py-1 flex-1" />
+          <input value={newAccountSynonyms} onChange={(e)=>setNewAccountSynonyms(e.target.value)} placeholder="Synonymes (séparés par des ,)" className="border rounded px-2 py-1 flex-1" />
+          <button onClick={addAccount} className="px-3 py-1 rounded bg-blue-600 text-white text-sm">Ajouter</button>
+        </div>
+        <div className="mt-4">
+          {accounts.length === 0 ? (
+            <div className="text-sm text-gray-500">Aucun compte configuré.</div>
+          ) : (
+            <ul className="divide-y">
+              {accounts.map((a)=> (
+                <li key={a.id} className="flex items-center justify-between py-2">
+                  <div>
+                    <span className="font-mono text-sm mr-2">{a.code}</span>
+                    <span className="text-sm">{a.label}</span>
+                    {a.synonyms && a.synonyms.length>0 && (
+                      <span className="text-xs text-gray-500 ml-2">({a.synonyms.join(', ')})</span>
+                    )}
+                  </div>
+                  <button className="text-sm px-2 py-1 rounded border" onClick={()=>removeAccount(a.code)}>Supprimer</button>
                 </li>
               ))}
             </ul>

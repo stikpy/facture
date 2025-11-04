@@ -6,14 +6,14 @@ export interface AccountPreset {
 
 // Presets simples pour hôtellerie-restauration (PCG FR)
 export const HOTEL_RESTAURANT_ACCOUNTS: AccountPreset[] = [
-  { code: '601', label: 'Achats stockés - Matières premières', synonyms: ['nourriture', 'nourri', 'food', 'pdj', 'restauration'] },
+  { code: '601', label: 'Achats stockés - Matières premières', synonyms: ['nourriture', 'nourri', 'food', 'pdj', 'restauration', 'solide cuisine'] },
   { code: '602', label: 'Achats stockés - Autres approvisionnements' },
   { code: '606', label: 'Achats non stockés - Fournitures', synonyms: ['consommables', 'disposables'] },
   { code: '6061', label: 'Fournitures non stockables (eau, énergie...)', synonyms: ['energie', 'eau', 'electricite', 'gaz'] },
   { code: '6063', label: "Fournitures d’entretien et de petit équipement", synonyms: ['equipement', 'petit materiel', 'ustensiles'] },
   { code: '6064', label: 'Fournitures administratives', synonyms: ['bureau', 'paperasse'] },
   { code: '6068', label: 'Autres matières et fournitures' },
-  { code: '607', label: 'Achats de marchandises (alimentaire, boissons)', synonyms: ['boissons', 'bev', 'bar', 'alcool'] },
+  { code: '607', label: 'Achats de marchandises (alimentaire, boissons)', synonyms: ['boissons', 'bev', 'bar', 'alcool', 'solide bar'] },
   { code: '611', label: 'Sous-traitance générale' },
   { code: '613', label: 'Locations' },
   { code: '624', label: 'Transports', synonyms: ['transport', 'livraison', 'frais de port'] },
