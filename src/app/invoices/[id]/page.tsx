@@ -111,6 +111,7 @@ export default function InvoiceEditPage() {
   const [pdfUrl, setPdfUrl] = useState<string | null>(null)
   const [showPreview, setShowPreview] = useState(true)
   const [pdfZoom, setPdfZoom] = useState(100)
+  const [pdfRotation, setPdfRotation] = useState(0)
   const [previewWidth, setPreviewWidth] = useState(33.33) // % de la largeur
   const [isResizing, setIsResizing] = useState(false)
   const [isEditingProps, setIsEditingProps] = useState(false)
@@ -328,6 +329,23 @@ export default function InvoiceEditPage() {
     }
     fetchData()
   }, [params.id, router, ctxSupplierId])
+
+  // Charger / sauvegarder la rotation d'aperçu (par facture) en localStorage
+  useEffect(() => {
+    try {
+      const key = `invoice-rotation-${params.id}`
+      const saved = localStorage.getItem(key)
+      if (saved != null) setPdfRotation(Number(saved) || 0)
+    } catch {}
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  useEffect(() => {
+    try {
+      const key = `invoice-rotation-${params.id}`
+      localStorage.setItem(key, String(((pdfRotation % 360) + 360) % 360))
+    } catch {}
+  }, [pdfRotation, params.id])
 
   // Charger les métadonnées de queue pour afficher des détails utiles lorsque status === error
   useEffect(() => {
@@ -1539,7 +1557,7 @@ export default function InvoiceEditPage() {
                 <div className="flex items-center justify-between mb-2 px-2 border-b pb-2">
                   <h2 className="text-sm font-semibold text-gray-900">Aperçu PDF</h2>
                   <div className="flex items-center space-x-2">
-                    <div className="flex items-center space-x-1 border rounded px-2 py-1">
+                <div className="flex items-center space-x-1 border rounded px-2 py-1">
                       <button 
                         onClick={() => setPdfZoom(Math.max(50, pdfZoom - 10))}
                         className="text-gray-600 hover:text-gray-900 text-lg font-bold"
@@ -1556,6 +1574,23 @@ export default function InvoiceEditPage() {
                         +
                       </button>
                     </div>
+                <div className="flex items-center space-x-1 border rounded px-2 py-1">
+                  <button 
+                    onClick={() => setPdfRotation((r) => (r - 90 + 360) % 360)}
+                    className="text-gray-600 hover:text-gray-900 text-sm font-bold"
+                    title="Rotation gauche 90°"
+                  >
+                    ⟲
+                  </button>
+                  <span className="text-xs text-gray-600 min-w-[28px] text-center">{pdfRotation}°</span>
+                  <button 
+                    onClick={() => setPdfRotation((r) => (r + 90) % 360)}
+                    className="text-gray-600 hover:text-gray-900 text-sm font-bold"
+                    title="Rotation droite 90°"
+                  >
+                    ⟳
+                  </button>
+                </div>
                     <Button variant="ghost" size="sm" onClick={() => setShowPreview(false)}>✕</Button>
                   </div>
                 </div>
@@ -1568,7 +1603,14 @@ export default function InvoiceEditPage() {
                         width: '100%', 
                         height: '100%',
                         minHeight: '100%',
-                        transform: `scale(${pdfZoom / 100})`,
+                        transform: (() => {
+                          const r = ((pdfRotation % 360) + 360) % 360
+                          const s = pdfZoom / 100
+                          if (r === 90) return `rotate(90deg) translateY(-100%) scale(${s})`
+                          if (r === 180) return `rotate(180deg) translate(-100%, -100%) scale(${s})`
+                          if (r === 270) return `rotate(270deg) translateX(-100%) scale(${s})`
+                          return `rotate(0deg) scale(${s})`
+                        })(),
                         transformOrigin: 'top left'
                       }} 
                       onError={(e) => {
