@@ -68,7 +68,7 @@ const resolveDocumentTypeMeta = (raw?: string | null): ListDocumentTypeMeta => {
 export function InvoiceList({ from, to }: { from?: string; to?: string }) {
   const [rawInvoices, setRawInvoices] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
-  const [filter, setFilter] = useState<'all' | 'completed' | 'processing' | 'error'>('all')
+  const [filter, setFilter] = useState<'all' | 'completed' | 'processing' | 'awaiting_user' | 'error'>('all')
   const [searchTerm, setSearchTerm] = useState('')
   const [selected, setSelected] = useState<Record<string, boolean>>({})
   const [sortKey, setSortKey] = useState<'date'|'supplier'|'code'|'subtotal'|'total'|'status'>('date')
@@ -119,8 +119,10 @@ export function InvoiceList({ from, to }: { from?: string; to?: string }) {
       if (filter !== 'all') {
         if (filter === 'processing') {
           query = query.in('status', ['processing', 'queued'] as any)
+        } else if (filter === 'awaiting_user') {
+          query = query.eq('status', 'awaiting_user')
         } else if (filter === 'error') {
-          query = query.in('status', ['error', 'duplicate', 'awaiting_user'] as any)
+          query = query.in('status', ['error', 'duplicate'] as any)
         } else {
           query = query.eq('status', filter)
         }
@@ -419,6 +421,7 @@ export function InvoiceList({ from, to }: { from?: string; to?: string }) {
             { key: 'all', label: 'Toutes' },
             { key: 'completed', label: 'Terminées' },
             { key: 'processing', label: 'En cours' },
+            { key: 'awaiting_user', label: 'À traiter' },
             { key: 'error', label: 'Erreurs' }
           ].map(({ key, label }) => (
             <Button
