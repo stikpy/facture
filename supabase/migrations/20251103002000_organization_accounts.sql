@@ -15,7 +15,8 @@ create index if not exists idx_org_accounts_org on public.organization_accounts(
 alter table public.organization_accounts enable row level security;
 
 -- RLS: membres de l'organisation
-create policy if not exists "org members select accounts" on public.organization_accounts
+drop policy if exists "org members select accounts" on public.organization_accounts;
+create policy "org members select accounts" on public.organization_accounts
 for select using (
   exists (
     select 1 from public.organization_members m
@@ -23,7 +24,8 @@ for select using (
   )
 );
 
-create policy if not exists "org members insert accounts" on public.organization_accounts
+drop policy if exists "org members insert accounts" on public.organization_accounts;
+create policy "org members insert accounts" on public.organization_accounts
 for insert with check (
   exists (
     select 1 from public.organization_members m
@@ -31,7 +33,8 @@ for insert with check (
   )
 );
 
-create policy if not exists "org members update accounts" on public.organization_accounts
+drop policy if exists "org members update accounts" on public.organization_accounts;
+create policy "org members update accounts" on public.organization_accounts
 for update using (
   exists (
     select 1 from public.organization_members m
@@ -39,7 +42,8 @@ for update using (
   )
 );
 
-create policy if not exists "org members delete accounts" on public.organization_accounts
+drop policy if exists "org members delete accounts" on public.organization_accounts;
+create policy "org members delete accounts" on public.organization_accounts
 for delete using (
   exists (
     select 1 from public.organization_members m
