@@ -128,6 +128,7 @@ export async function GET(request: NextRequest) {
     let byAccountMap = new Map<string, { total: number; ht: number; tva: number; count: number }>()
     let byVatMap = new Map<string, { total: number; ht: number; tva: number; count: number }>()
     let byCenterMap = new Map<string, { total: number; ht: number; tva: number; count: number }>()
+    let unassigned = { ht: 0, tva: 0, total: 0, count: 0, invoices: new Set<string>() as Set<string> }
     if (filteredIds.length > 0) {
       const { data: allocs } = await (supabaseAdmin as any)
         .from('invoice_allocations')
@@ -156,16 +157,21 @@ export async function GET(request: NextRequest) {
         allocatedMap.set(invId, cur)
 
         // Par compte
-        const accKey = String((a as any).account_code || '—')
+        const accKeyRaw = String((a as any).account_code || '').trim()
+        if (!accKeyRaw) {
+          unassigned.ht += ht; unassigned.tva += tva; unassigned.total += total; unassigned.count += 1; unassigned.invoices.add(invId)
+        } else {
+          const accKey = accKeyRaw
         const acc = byAccountMap.get(accKey) || { total: 0, ht: 0, tva: 0, count: 0 }
         acc.ht += ht; acc.tva += tva; acc.total += total; acc.count += 1
         byAccountMap.set(accKey, acc)
 
         // Par centre (libellé d'organisation si dispo, sinon code)
-        const centerKey = accountLabels.get(accKey) ? `${accKey} - ${accountLabels.get(accKey)}` : accKey
-        const c = byCenterMap.get(centerKey) || { total: 0, ht: 0, tva: 0, count: 0 }
-        c.ht += ht; c.tva += tva; c.total += total; c.count += 1
-        byCenterMap.set(centerKey, c)
+          const centerKey = accountLabels.get(accKey) ? `${accKey} - ${accountLabels.get(accKey)}` : accKey
+          const c = byCenterMap.get(centerKey) || { total: 0, ht: 0, tva: 0, count: 0 }
+          c.ht += ht; c.tva += tva; c.total += total; c.count += 1
+          byCenterMap.set(centerKey, c)
+        }
 
         // Par TVA (code ou taux)
         const vKey = String((a as any).vat_code || `${rate}%`)
@@ -377,7 +383,14 @@ export async function GET(request: NextRequest) {
     const coverage = {
       invoicesAllocated: Array.from(allocatedMap.keys()).length,
       invoicesTotal: filtered.length,
-      invoicesUnallocated: filtered.length - Array.from(allocatedMap.keys()).length
+      invoicesUnallocated: filtered.length - Array.from(allocatedMap.keys()).length,
+      unassignedAllocations: {
+        ht: unassigned.ht,
+        tva: unassigned.tva,
+        total: unassigned.total,
+        count: unassigned.count,
+        invoices: Array.from(unassigned.invoices)
+      }
     }
 
     return NextResponse.json({ success: true, group, byGroup, byMonth: [], byYear, bySupplier, byCategory, byAccount, byVat, byCenter, coverage })

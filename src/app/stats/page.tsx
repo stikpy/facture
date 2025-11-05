@@ -272,6 +272,12 @@ export default function StatsPage() {
             </section>
           )}
 
+          {coverage?.unassignedAllocations && (coverage.unassignedAllocations.total > 0) && (
+            <div className='border rounded-md bg-amber-50 p-3 text-sm text-amber-800'>
+              <span className='font-medium'>Attention:</span> {numberFmt.format(coverage.unassignedAllocations.total)} sans compte comptable (allocations non affectées). Pense à compléter les comptes concernés.
+            </div>
+          )}
+
           {byAccount.length > 0 && (
             <section className='space-y-4'>
               <div className='flex items-center justify-between'>
