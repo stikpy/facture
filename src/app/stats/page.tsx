@@ -3,7 +3,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { createClient } from '@/utils/supabase/client'
-import { HOTEL_RESTAURANT_ACCOUNTS } from '@/lib/accounting-presets'
+import { HOTEL_RESTAURANT_ACCOUNTS, VAT_PRESETS } from '@/lib/accounting-presets'
 import { formatTitleCaseName } from '@/lib/utils'
 import {
   ResponsiveContainer,
@@ -33,6 +33,7 @@ export default function StatsPage() {
   const [byVat, setByVat] = useState<ByVat[]>([])
   const [coverage, setCoverage] = useState<Coverage | null>(null)
   const [orgAccounts, setOrgAccounts] = useState<Array<{ code: string; label: string }>>([])
+  const [orgVatCodes, setOrgVatCodes] = useState<Array<{ code: string; label: string; rate?: number }>>([])
   const [debugJson, setDebugJson] = useState<any>(null)
 
   // Filtres
@@ -87,10 +88,17 @@ export default function StatsPage() {
   useEffect(() => {
     const run = async () => {
       try {
-        const res = await fetch('/api/orgs/accounts')
-        if (res.ok) {
-          const j = await res.json()
+        const [ra, rv] = await Promise.all([
+          fetch('/api/orgs/accounts'),
+          fetch('/api/orgs/vat')
+        ])
+        if (ra.ok) {
+          const j = await ra.json()
           setOrgAccounts((j.accounts || []).map((a: any) => ({ code: a.code, label: a.label })))
+        }
+        if (rv.ok) {
+          const jv = await rv.json()
+          setOrgVatCodes((jv.vatCodes || []).map((v: any) => ({ code: v.code, label: v.label, rate: v.rate })))
         }
       } catch {}
     }
@@ -106,6 +114,28 @@ export default function StatsPage() {
     if (preset) return `${preset.code} - ${preset.label}`
     return c
   }, [orgAccounts])
+
+  const resolveVatLabel = useCallback((key?: string) => {
+    const vKey = String(key || '')
+    if (!vKey) return '—'
+    const isRate = vKey.includes('%')
+    if (!isRate) {
+      const org = orgVatCodes.find(v => v.code === vKey)
+      if (org) return `${org.code} - ${org.label}${org.rate!=null?` (${org.rate}%)`:''}`
+      const preset = VAT_PRESETS.find(v => v.code.toLowerCase() === vKey.toLowerCase())
+      if (preset) return `${preset.code} - ${preset.label} (${preset.rate}%)`
+      return vKey
+    }
+    const rate = Number(vKey.replace('%','').replace(',','.'))
+    if (!Number.isNaN(rate)) {
+      const org = orgVatCodes.find(v => v.rate!=null && Math.abs(Number(v.rate) - rate) < 0.01)
+      if (org) return `${org.code} - ${org.label} (${rate}%)`
+      const preset = VAT_PRESETS.reduce((best: any, v: any) => !best || Math.abs(v.rate-rate) < Math.abs(best.rate-rate) ? v : best, null as any)
+      if (preset) return `${preset.code} - ${preset.label} (${rate}%)`
+      return `${rate}%`
+    }
+    return vKey
+  }, [orgVatCodes])
 
   useEffect(() => {
     fetchData()
@@ -291,11 +321,11 @@ export default function StatsPage() {
               </div>
               <div className='h-64 w-full border rounded-md bg-white p-2'>
                 <ResponsiveContainer width="100%" height="100%">
-                  <BarChart data={byVat.slice(0, 12)} layout='vertical' margin={{ top: 10, right: 20, left: 40, bottom: 0 }}>
+                  <BarChart data={byVat.slice(0, 12).map(r => ({ ...r, vatLabel: resolveVatLabel(r.vat) }))} layout='vertical' margin={{ top: 10, right: 20, left: 40, bottom: 0 }}>
                     <CartesianGrid strokeDasharray="3 3" />
                     <XAxis type='number' />
-                    <YAxis type='category' dataKey='vat' width={160} />
-                    <Tooltip formatter={(v: any) => typeof v === 'number' ? numberFmt.format(v) : v} />
+                    <YAxis type='category' dataKey='vatLabel' width={260} />
+                    <Tooltip formatter={(v: any) => typeof v === 'number' ? numberFmt.format(v) : v} labelFormatter={(label: any) => String(label)} />
                     <Bar dataKey='total' name='Total ventilé' fill='#f59e0b' />
                   </BarChart>
                 </ResponsiveContainer>
@@ -314,7 +344,7 @@ export default function StatsPage() {
                   <tbody>
                     {byVat.map((r) => (
                       <tr key={r.vat} className='border-t'>
-                        <td className='px-4 py-2'>{r.vat}</td>
+                        <td className='px-4 py-2' title={resolveVatLabel(r.vat)}>{resolveVatLabel(r.vat)}</td>
                         <td className='px-4 py-2 text-right'>{numberFmt.format(r.total)}</td>
                         <td className='px-4 py-2 text-right'>{numberFmt.format(r.ht)}</td>
                         <td className='px-4 py-2 text-right'>{numberFmt.format(r.tva)}</td>
