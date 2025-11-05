@@ -37,6 +37,10 @@ export async function GET(request: NextRequest) {
     const min = minStr ? Number(minStr) : undefined
     const max = maxStr ? Number(maxStr) : undefined
     const allocFilter = (searchParams.get('alloc') || 'all').toLowerCase() // all|allocated|unallocated
+    const accountsParam = (searchParams.get('accounts') || '').trim()
+    const selectedAccounts = new Set(
+      accountsParam ? accountsParam.split(',').map(s => s.trim()).filter(Boolean) : []
+    )
 
     // Lire avec le client utilisateur (RLS) + filtre organisation courant
     let orgId: string | null = null
@@ -152,40 +156,51 @@ export async function GET(request: NextRequest) {
         const rate = Number((a as any).vat_rate || 0)
         const tva = rate > 0 ? ht * (rate / 100) : 0
         const total = ht + tva
-        const cur = allocatedMap.get(invId) || { ht: 0, tva: 0, total: 0, count: 0 }
-        cur.ht += ht; cur.tva += tva; cur.total += total; cur.count += 1
-        allocatedMap.set(invId, cur)
-
-        // Par compte
         const accKeyRaw = String((a as any).account_code || '').trim()
+        const include = (selectedAccounts.size === 0) || selectedAccounts.has(accKeyRaw)
+
+        // Totaux par facture: inclure toujours quand pas de filtre, sinon uniquement si le compte appartient à la sélection
+        if (selectedAccounts.size === 0 || include) {
+          const cur = allocatedMap.get(invId) || { ht: 0, tva: 0, total: 0, count: 0 }
+          cur.ht += ht; cur.tva += tva; cur.total += total; cur.count += 1
+          allocatedMap.set(invId, cur)
+        }
+
+        // Par compte / centre / TVA
         if (!accKeyRaw) {
           unassigned.ht += ht; unassigned.tva += tva; unassigned.total += total; unassigned.count += 1; unassigned.invoices.add(invId)
         } else {
           const accKey = accKeyRaw
-        const acc = byAccountMap.get(accKey) || { total: 0, ht: 0, tva: 0, count: 0 }
-        acc.ht += ht; acc.tva += tva; acc.total += total; acc.count += 1
-        byAccountMap.set(accKey, acc)
+          if (include) {
+            const acc = byAccountMap.get(accKey) || { total: 0, ht: 0, tva: 0, count: 0 }
+            acc.ht += ht; acc.tva += tva; acc.total += total; acc.count += 1
+            byAccountMap.set(accKey, acc)
 
-        // Par centre (libellé d'organisation si dispo, sinon code)
-          const centerKey = accountLabels.get(accKey) ? `${accKey} - ${accountLabels.get(accKey)}` : accKey
-          const c = byCenterMap.get(centerKey) || { total: 0, ht: 0, tva: 0, count: 0 }
-          c.ht += ht; c.tva += tva; c.total += total; c.count += 1
-          byCenterMap.set(centerKey, c)
+            // Par centre (libellé d'organisation si dispo, sinon code)
+            const centerKey = accountLabels.get(accKey) ? `${accKey} - ${accountLabels.get(accKey)}` : accKey
+            const c = byCenterMap.get(centerKey) || { total: 0, ht: 0, tva: 0, count: 0 }
+            c.ht += ht; c.tva += tva; c.total += total; c.count += 1
+            byCenterMap.set(centerKey, c)
+          }
         }
-
-        // Par TVA (code ou taux)
+        // Par TVA (code ou taux) filtrée sur les comptes sélectionnés le cas échéant
         const vKey = String((a as any).vat_code || `${rate}%`)
-        const v = byVatMap.get(vKey) || { total: 0, ht: 0, tva: 0, count: 0 }
-        v.ht += ht; v.tva += tva; v.total += total; v.count += 1
-        byVatMap.set(vKey, v)
+        if (selectedAccounts.size === 0 || include) {
+          const v = byVatMap.get(vKey) || { total: 0, ht: 0, tva: 0, count: 0 }
+          v.ht += ht; v.tva += tva; v.total += total; v.count += 1
+          byVatMap.set(vKey, v)
+        }
       }
     }
 
     // Appliquer filtre allocations si demandé
     const filteredByAlloc = filtered.filter((r: any) => {
-      if (allocFilter === 'all') return true
-      const has = allocatedMap.has(String(r.id))
-      return allocFilter === 'allocated' ? has : !has
+      const hasAlloc = allocatedMap.has(String(r.id))
+      if (allocFilter === 'allocated' && !hasAlloc) return false
+      if (allocFilter === 'unallocated' && hasAlloc) return false
+      // Si un filtre comptes est actif, ne conserver que les factures ayant contribué (allocatedMap alimenté ci-dessus)
+      if (selectedAccounts.size > 0 && !hasAlloc) return false
+      return true
     })
 
     // Regroupement par jour ou par mois
@@ -380,6 +395,18 @@ export async function GET(request: NextRequest) {
       .map(([center, v]) => ({ center, ...v }))
       .sort((a, b) => b.total - a.total)
 
+    // Totaux cohérents avec le scope
+    const totals = (() => {
+      let ht = 0, tva = 0, total = 0, count = 0
+      for (const r of filteredByAlloc as any[]) {
+        const ed = r.extracted_data || {}
+        const alloc = allocatedMap.get(String((r as any).id))
+        if (alloc) { ht += alloc.ht; tva += alloc.tva; total += alloc.total; count += 1 }
+        else { ht += toNum(ed.subtotal); tva += toNum(ed.tax_amount); total += toNum(ed.total_amount); count += 1 }
+      }
+      return { ht, tva, total, count }
+    })()
+
     const coverage = {
       invoicesAllocated: Array.from(allocatedMap.keys()).length,
       invoicesTotal: filtered.length,
@@ -390,7 +417,8 @@ export async function GET(request: NextRequest) {
         total: unassigned.total,
         count: unassigned.count,
         invoices: Array.from(unassigned.invoices)
-      }
+      },
+      totals
     }
 
     return NextResponse.json({ success: true, group, byGroup, byMonth: [], byYear, bySupplier, byCategory, byAccount, byVat, byCenter, coverage })

@@ -46,6 +46,7 @@ export default function StatsPage() {
   const [status, setStatus] = useState<string>('')
   const [min, setMin] = useState<string>('')
   const [max, setMax] = useState<string>('')
+  const [selectedAccounts, setSelectedAccounts] = useState<string[]>([])
   const [alloc, setAlloc] = useState<'all'|'allocated'|'unallocated'>('all')
 
   // Tri fournisseur
@@ -66,6 +67,7 @@ export default function StatsPage() {
     if (status) params.set('status', status)
     if (min) params.set('min', min)
     if (max) params.set('max', max)
+    if (selectedAccounts.length) params.set('accounts', selectedAccounts.join(','))
     if (alloc) params.set('alloc', alloc)
 
     const res = await fetch(`/api/stats?${params.toString()}`, { headers })
@@ -85,7 +87,7 @@ export default function StatsPage() {
       setDebugJson({ status: res.status, error: text })
     }
     setLoading(false)
-  }, [group, from, to, supplier, status, min, max, alloc])
+  }, [group, from, to, supplier, status, min, max, alloc, selectedAccounts])
 
   // Charger comptes d'organisation pour labels
   useEffect(() => {
@@ -273,10 +275,29 @@ export default function StatsPage() {
               <input type='number' step='0.01' value={max} onChange={e => setMax(e.target.value)} className='w-full border rounded px-2 py-2 text-sm' />
             </div>
           </div>
+          <div className='md:col-span-2'>
+            <label className='block text-xs text-gray-600 mb-1'>Centres (comptes) à inclure</label>
+            <div className='border rounded p-2 max-h-28 overflow-auto bg-white'>
+              <div className='flex items-center gap-2 mb-2'>
+                <button className='text-xs border rounded px-2 py-1' onClick={() => setSelectedAccounts(orgAccounts.map(a => a.code))}>Tout</button>
+                <button className='text-xs border rounded px-2 py-1' onClick={() => setSelectedAccounts([])}>Aucun</button>
+              </div>
+              <div className='grid grid-cols-2 gap-x-3'>
+                {orgAccounts.map(a => (
+                  <label key={a.code} className='flex items-center gap-2 text-xs py-0.5'>
+                    <input type='checkbox' checked={selectedAccounts.includes(a.code)} onChange={(e)=>{
+                      setSelectedAccounts(prev => e.target.checked ? Array.from(new Set([...prev, a.code])) : prev.filter(c => c !== a.code))
+                    }} />
+                    <span>{a.code} - {a.label}</span>
+                  </label>
+                ))}
+              </div>
+            </div>
+          </div>
         </div>
         <div className='mt-3 flex gap-2'>
           <button onClick={fetchData} className='px-3 py-2 text-sm rounded bg-primary text-white'>Appliquer</button>
-          <button onClick={() => { setFrom(''); setTo(''); setSupplier(''); setStatus(''); setMin(''); setMax(''); }} className='px-3 py-2 text-sm rounded border'>Réinitialiser</button>
+          <button onClick={() => { setFrom(''); setTo(''); setSupplier(''); setStatus(''); setMin(''); setMax(''); setSelectedAccounts([]); }} className='px-3 py-2 text-sm rounded border'>Réinitialiser</button>
         </div>
       </section>
 
@@ -297,6 +318,22 @@ export default function StatsPage() {
               <div className='border rounded-md bg-white p-4'>
                 <div className='text-xs text-gray-500'>Total factures</div>
                 <div className='text-2xl font-semibold'>{coverage.invoicesTotal}</div>
+              </div>
+            </section>
+          )}
+          {coverage?.totals && (
+            <section className='grid grid-cols-1 md:grid-cols-3 gap-3'>
+              <div className='border rounded-md bg-white p-4'>
+                <div className='text-xs text-gray-500'>Total HT (filtre)</div>
+                <div className='text-2xl font-semibold'>{numberFmt.format(coverage.totals.ht)}</div>
+              </div>
+              <div className='border rounded-md bg-white p-4'>
+                <div className='text-xs text-gray-500'>TVA (filtre)</div>
+                <div className='text-2xl font-semibold'>{numberFmt.format(coverage.totals.tva)}</div>
+              </div>
+              <div className='border rounded-md bg-white p-4'>
+                <div className='text-xs text-gray-500'>Total TTC (filtre)</div>
+                <div className='text-2xl font-semibold'>{numberFmt.format(coverage.totals.total)}</div>
               </div>
             </section>
           )}
