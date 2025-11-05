@@ -75,6 +75,8 @@ export function InvoiceList({ from, to }: { from?: string; to?: string }) {
   const [sortDir, setSortDir] = useState<'asc'|'desc'>('desc')
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(20)
+  const [allocFilter, setAllocFilter] = useState<'all' | 'allocated' | 'unallocated'>('all')
+  const [allocatedMap, setAllocatedMap] = useState<Record<string, boolean>>({})
   const router = useRouter()
 
   const formatShortDate = (iso?: string) => {
@@ -153,7 +155,24 @@ export function InvoiceList({ from, to }: { from?: string; to?: string }) {
         })
       }
 
-      setRawInvoices(data as any || [])
+      const invoices = (data as any[]) || []
+      setRawInvoices(invoices as any || [])
+      // Charger la présence de ventilations pour ce user
+      try {
+        const ids = invoices.map((i: any) => i.id)
+        if (ids.length) {
+          const { data: allocs } = await (supabase
+            .from('invoice_allocations')
+            .select('invoice_id')
+            .eq('user_id', user.id)
+            .in('invoice_id', ids) as any)
+          const map: Record<string, boolean> = {}
+          for (const a of (allocs || [])) map[(a as any).invoice_id] = true
+          setAllocatedMap(map as any)
+        } else {
+          setAllocatedMap({} as any)
+        }
+      } catch { setAllocatedMap({} as any) }
     } catch (error) {
       console.error('Erreur lors du chargement des factures:', error)
     }
@@ -307,7 +326,7 @@ export function InvoiceList({ from, to }: { from?: string; to?: string }) {
   }
 
   const filteredInvoices = useMemo(() => {
-    if (!searchTerm.trim()) return rawInvoices
+    if (!searchTerm.trim() && allocFilter === 'all') return rawInvoices
 
     const term = searchTerm.trim().toLowerCase()
     const maybeAmount = Number(term.replace(',', '.'))
@@ -322,7 +341,7 @@ export function InvoiceList({ from, to }: { from?: string; to?: string }) {
       return [s1, s2, s3, s4, s5]
     }
 
-    return rawInvoices.filter((inv: any) => {
+    const base = rawInvoices.filter((inv: any) => {
       const ed = inv.extracted_data || {}
       const items = Array.isArray(ed.items) ? ed.items : []
 
@@ -362,7 +381,13 @@ export function InvoiceList({ from, to }: { from?: string; to?: string }) {
 
       return textMatch || amountMatch
     })
-  }, [rawInvoices, searchTerm])
+
+    if (allocFilter === 'all') return base
+    return base.filter((inv: any) => {
+      const hasAlloc = !!allocatedMap[inv.id]
+      return allocFilter === 'allocated' ? hasAlloc : !hasAlloc
+    })
+  }, [rawInvoices, searchTerm, allocFilter, allocatedMap])
 
   // Tri + pagination (calculés une seule fois par changement d'état)
   const sortedInvoices = useMemo(() => {
@@ -429,6 +454,21 @@ export function InvoiceList({ from, to }: { from?: string; to?: string }) {
               variant={filter === key ? 'default' : 'outline'}
               size="sm"
               onClick={() => setFilter(key as any)}
+            >
+              {label}
+            </Button>
+          ))}
+          <div className="ml-2" />
+          {[
+            { key: 'all', label: 'Toutes' },
+            { key: 'allocated', label: 'Avec ventilations' },
+            { key: 'unallocated', label: 'À ventiler' },
+          ].map(({ key, label }) => (
+            <Button
+              key={key}
+              variant={allocFilter === (key as any) ? 'default' : 'outline'}
+              size="sm"
+              onClick={() => setAllocFilter(key as any)}
             >
               {label}
             </Button>
@@ -528,7 +568,16 @@ export function InvoiceList({ from, to }: { from?: string; to?: string }) {
                     <td className="px-2 py-1 text-right">{ed.subtotal ? formatCurrency(ed.subtotal) : '—'}</td>
                     <td className="px-2 py-1 text-right">{ed.total_amount ? formatCurrency(ed.total_amount) : '—'}</td>
                     <td className="px-2 py-1">{ed.currency || '—'}</td>
-                    <td className="px-2 py-1">{statusIcon(inv.status)}</td>
+                    <td className="px-2 py-1">
+                      <div className="flex items-center gap-1">
+                        {statusIcon(inv.status)}
+                        {allocatedMap[(inv as any).id] ? (
+                          <span className="ml-1 inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-medium bg-emerald-100 text-emerald-800 border border-emerald-200">Ventilé</span>
+                        ) : (
+                          <span className="ml-1 inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-medium bg-amber-100 text-amber-800 border border-amber-200">À ventiler</span>
+                        )}
+                      </div>
+                    </td>
                     <td className="px-2 py-1">{formatShortDate(inv.created_at)}</td>
                     <td className="px-2 py-1 text-right">
                       <div className="flex justify-end space-x-1">
