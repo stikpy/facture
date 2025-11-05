@@ -270,7 +270,7 @@ export default function StatsPage() {
                   <tbody>
                     {byAccount.map((r) => (
                       <tr key={r.account} className='border-t'>
-                        <td className='px-4 py-2' title={resolveAccountLabel(r.account)}>{r.account}</td>
+                        <td className='px-4 py-2' title={resolveAccountLabel(r.account)}>{resolveAccountLabel(r.account)}</td>
                         <td className='px-4 py-2 text-right'>{numberFmt.format(r.total)}</td>
                         <td className='px-4 py-2 text-right'>{numberFmt.format(r.ht)}</td>
                         <td className='px-4 py-2 text-right'>{numberFmt.format(r.tva)}</td>
