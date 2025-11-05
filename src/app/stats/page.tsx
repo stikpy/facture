@@ -14,6 +14,9 @@ type ByGroup = { period: string; total: number; ht: number; tva: number; count: 
 type ByYear = { year: string; total: number; ht: number; tva: number; count: number }
 type BySupplier = { supplier: string; supplierCode?: string; supplierId?: string; total: number; ht: number; tva: number; count: number }
 type ByCategory = { category: string; total: number; ht: number; tva: number; count: number }
+type ByAccount = { account: string; total: number; ht: number; tva: number; count: number }
+type ByVat = { vat: string; total: number; ht: number; tva: number; count: number }
+type Coverage = { invoicesAllocated: number; invoicesUnallocated: number; invoicesTotal: number }
 
 type SortDir = 'asc' | 'desc'
 
@@ -25,6 +28,9 @@ export default function StatsPage() {
   const [byYear, setByYear] = useState<ByYear[]>([])
   const [bySupplier, setBySupplier] = useState<BySupplier[]>([])
   const [byCategory, setByCategory] = useState<ByCategory[]>([])
+  const [byAccount, setByAccount] = useState<ByAccount[]>([])
+  const [byVat, setByVat] = useState<ByVat[]>([])
+  const [coverage, setCoverage] = useState<Coverage | null>(null)
   const [debugJson, setDebugJson] = useState<any>(null)
 
   // Filtres
@@ -35,6 +41,7 @@ export default function StatsPage() {
   const [status, setStatus] = useState<string>('')
   const [min, setMin] = useState<string>('')
   const [max, setMax] = useState<string>('')
+  const [alloc, setAlloc] = useState<'all'|'allocated'|'unallocated'>('all')
 
   // Tri fournisseur
   const [supplierSortKey, setSupplierSortKey] = useState<keyof BySupplier>('total')
@@ -54,6 +61,7 @@ export default function StatsPage() {
     if (status) params.set('status', status)
     if (min) params.set('min', min)
     if (max) params.set('max', max)
+    if (alloc) params.set('alloc', alloc)
 
     const res = await fetch(`/api/stats?${params.toString()}`, { headers })
     if (res.ok) {
@@ -63,12 +71,15 @@ export default function StatsPage() {
       setBySupplier(json.bySupplier || [])
       setByCategory(json.byCategory || [])
       setDebugJson(json)
+      setByAccount(json.byAccount || [])
+      setByVat(json.byVat || [])
+      setCoverage(json.coverage || null)
     } else {
       const text = await res.text()
       setDebugJson({ status: res.status, error: text })
     }
     setLoading(false)
-  }, [group, from, to, supplier, status, min, max])
+  }, [group, from, to, supplier, status, min, max, alloc])
 
   useEffect(() => {
     fetchData()
@@ -156,6 +167,14 @@ export default function StatsPage() {
               <option value='error'>Erreur</option>
             </select>
           </div>
+          <div>
+            <label className='block text-xs text-gray-600 mb-1'>Ventilations</label>
+            <select value={alloc} onChange={e => setAlloc(e.target.value as any)} className='w-full border rounded px-2 py-2 text-sm'>
+              <option value='all'>Toutes</option>
+              <option value='allocated'>Avec ventilations</option>
+              <option value='unallocated'>À ventiler</option>
+            </select>
+          </div>
           <div className='grid grid-cols-2 gap-2'>
             <div>
               <label className='block text-xs text-gray-600 mb-1'>Montant min (€)</label>
@@ -177,6 +196,110 @@ export default function StatsPage() {
         <div className='text-sm text-gray-500'>Chargement…</div>
       ) : (
         <div className='space-y-10'>
+          {coverage && (
+            <section className='grid grid-cols-1 md:grid-cols-3 gap-3'>
+              <div className='border rounded-md bg-white p-4'>
+                <div className='text-xs text-gray-500'>Factures ventilées</div>
+                <div className='text-2xl font-semibold'>{coverage.invoicesAllocated}</div>
+              </div>
+              <div className='border rounded-md bg-white p-4'>
+                <div className='text-xs text-gray-500'>À ventiler</div>
+                <div className='text-2xl font-semibold'>{coverage.invoicesUnallocated}</div>
+              </div>
+              <div className='border rounded-md bg-white p-4'>
+                <div className='text-xs text-gray-500'>Total factures</div>
+                <div className='text-2xl font-semibold'>{coverage.invoicesTotal}</div>
+              </div>
+            </section>
+          )}
+
+          {byAccount.length > 0 && (
+            <section className='space-y-4'>
+              <div className='flex items-center justify-between'>
+                <h2 className='text-lg font-medium'>Par compte comptable (ventilations)</h2>
+                <button className='text-sm text-primary hover:underline' onClick={() => downloadCsv('par_compte', byAccount, ['account','total','ht','tva','count'])}>Export CSV</button>
+              </div>
+              <div className='h-64 w-full border rounded-md bg-white p-2'>
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={byAccount.slice(0, 12)} layout='vertical' margin={{ top: 10, right: 20, left: 40, bottom: 0 }}>
+                    <CartesianGrid strokeDasharray="3 3" />
+                    <XAxis type='number' />
+                    <YAxis type='category' dataKey='account' width={140} />
+                    <Tooltip formatter={(v: any) => typeof v === 'number' ? numberFmt.format(v) : v} />
+                    <Bar dataKey='total' name='Total ventilé' fill='#059669' />
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+              <div className='overflow-auto border rounded-md'>
+                <table className='min-w-full text-sm'>
+                  <thead className='bg-gray-50'>
+                    <tr>
+                      <th className='text-left px-4 py-2'>Compte</th>
+                      <th className='text-right px-4 py-2'>Total</th>
+                      <th className='text-right px-4 py-2'>HT</th>
+                      <th className='text-right px-4 py-2'>TVA</th>
+                      <th className='text-right px-4 py-2'>#</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {byAccount.map((r) => (
+                      <tr key={r.account} className='border-t'>
+                        <td className='px-4 py-2'>{r.account}</td>
+                        <td className='px-4 py-2 text-right'>{numberFmt.format(r.total)}</td>
+                        <td className='px-4 py-2 text-right'>{numberFmt.format(r.ht)}</td>
+                        <td className='px-4 py-2 text-right'>{numberFmt.format(r.tva)}</td>
+                        <td className='px-4 py-2 text-right'>{r.count}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </section>
+          )}
+
+          {byVat.length > 0 && (
+            <section className='space-y-4'>
+              <div className='flex items-center justify-between'>
+                <h2 className='text-lg font-medium'>Par code / taux TVA (ventilations)</h2>
+                <button className='text-sm text-primary hover:underline' onClick={() => downloadCsv('par_tva', byVat, ['vat','total','ht','tva','count'])}>Export CSV</button>
+              </div>
+              <div className='h-64 w-full border rounded-md bg-white p-2'>
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={byVat.slice(0, 12)} layout='vertical' margin={{ top: 10, right: 20, left: 40, bottom: 0 }}>
+                    <CartesianGrid strokeDasharray="3 3" />
+                    <XAxis type='number' />
+                    <YAxis type='category' dataKey='vat' width={160} />
+                    <Tooltip formatter={(v: any) => typeof v === 'number' ? numberFmt.format(v) : v} />
+                    <Bar dataKey='total' name='Total ventilé' fill='#f59e0b' />
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+              <div className='overflow-auto border rounded-md'>
+                <table className='min-w-full text-sm'>
+                  <thead className='bg-gray-50'>
+                    <tr>
+                      <th className='text-left px-4 py-2'>TVA</th>
+                      <th className='text-right px-4 py-2'>Total</th>
+                      <th className='text-right px-4 py-2'>HT</th>
+                      <th className='text-right px-4 py-2'>TVA</th>
+                      <th className='text-right px-4 py-2'>#</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {byVat.map((r) => (
+                      <tr key={r.vat} className='border-t'>
+                        <td className='px-4 py-2'>{r.vat}</td>
+                        <td className='px-4 py-2 text-right'>{numberFmt.format(r.total)}</td>
+                        <td className='px-4 py-2 text-right'>{numberFmt.format(r.ht)}</td>
+                        <td className='px-4 py-2 text-right'>{numberFmt.format(r.tva)}</td>
+                        <td className='px-4 py-2 text-right'>{r.count}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </section>
+          )}
           {byGroup.length === 0 && byYear.length === 0 && bySupplier.length === 0 && (
             <div className='border rounded-md p-4 bg-gray-50 text-sm'>
               <p className='mb-2 text-gray-700'>Aucune donnée agrégée. JSON de debug:</p>

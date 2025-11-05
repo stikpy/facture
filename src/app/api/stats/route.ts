@@ -36,6 +36,7 @@ export async function GET(request: NextRequest) {
     const maxStr = searchParams.get('max')
     const min = minStr ? Number(minStr) : undefined
     const max = maxStr ? Number(maxStr) : undefined
+    const allocFilter = (searchParams.get('alloc') || 'all').toLowerCase() // all|allocated|unallocated
 
     // Lire avec le client utilisateur (RLS) + filtre organisation courant
     let orgId: string | null = null
@@ -59,7 +60,7 @@ export async function GET(request: NextRequest) {
 
     let query = (supabase as any)
       .from('invoices')
-      .select('created_at, extracted_data, status, user_id, supplier_id, organization_id')
+      .select('id, created_at, extracted_data, status, user_id, supplier_id, organization_id')
       .limit(10000)
     if (orgId) query = query.eq('organization_id', orgId)
     const { data, error } = await query
@@ -121,16 +122,65 @@ export async function GET(request: NextRequest) {
       return true
     })
 
+    // Charger les ventilations de l'utilisateur sur ces factures
+    const filteredIds = filtered.map((r: any) => String(r.id))
+    let allocatedMap = new Map<string, { ht: number; tva: number; total: number; count: number }>()
+    let byAccountMap = new Map<string, { total: number; ht: number; tva: number; count: number }>()
+    let byVatMap = new Map<string, { total: number; ht: number; tva: number; count: number }>()
+    if (filteredIds.length > 0) {
+      const { data: allocs } = await (supabaseAdmin as any)
+        .from('invoice_allocations')
+        .select('invoice_id, account_code, amount, vat_code, vat_rate, user_id')
+        .in('invoice_id', filteredIds)
+        .eq('user_id', user.id)
+      for (const a of (allocs as any[]) || []) {
+        const invId = String((a as any).invoice_id)
+        const ht = Number((a as any).amount || 0)
+        const rate = Number((a as any).vat_rate || 0)
+        const tva = rate > 0 ? ht * (rate / 100) : 0
+        const total = ht + tva
+        const cur = allocatedMap.get(invId) || { ht: 0, tva: 0, total: 0, count: 0 }
+        cur.ht += ht; cur.tva += tva; cur.total += total; cur.count += 1
+        allocatedMap.set(invId, cur)
+
+        // Par compte
+        const accKey = String((a as any).account_code || '—')
+        const acc = byAccountMap.get(accKey) || { total: 0, ht: 0, tva: 0, count: 0 }
+        acc.ht += ht; acc.tva += tva; acc.total += total; acc.count += 1
+        byAccountMap.set(accKey, acc)
+
+        // Par TVA (code ou taux)
+        const vKey = String((a as any).vat_code || `${rate}%`)
+        const v = byVatMap.get(vKey) || { total: 0, ht: 0, tva: 0, count: 0 }
+        v.ht += ht; v.tva += tva; v.total += total; v.count += 1
+        byVatMap.set(vKey, v)
+      }
+    }
+
+    // Appliquer filtre allocations si demandé
+    const filteredByAlloc = filtered.filter((r: any) => {
+      if (allocFilter === 'all') return true
+      const has = allocatedMap.has(String(r.id))
+      return allocFilter === 'allocated' ? has : !has
+    })
+
     // Regroupement par jour ou par mois
     const byGroupMap = new Map<string, Totals>()
-    for (const r of filtered) {
+    for (const r of filteredByAlloc) {
       const ed = (r as any).extracted_data || {}
       const basisDateStr = String(ed.invoice_date || (r as any).created_at)
       const key = group === 'day' ? yyyy_mm_dd(basisDateStr) : yyyy_mm(basisDateStr)
       const cur = byGroupMap.get(key) || { total: 0, ht: 0, tva: 0, count: 0 }
-      cur.total += toNum(ed.total_amount)
-      cur.ht += toNum(ed.subtotal)
-      cur.tva += toNum(ed.tax_amount)
+      const alloc = allocatedMap.get(String((r as any).id))
+      if (alloc) {
+        cur.total += alloc.total
+        cur.ht += alloc.ht
+        cur.tva += alloc.tva
+      } else {
+        cur.total += toNum(ed.total_amount)
+        cur.ht += toNum(ed.subtotal)
+        cur.tva += toNum(ed.tax_amount)
+      }
       cur.count += 1
       byGroupMap.set(key, cur)
     }
@@ -145,9 +195,16 @@ export async function GET(request: NextRequest) {
       const basisDateStr = String(ed.invoice_date || (r as any).created_at)
       const key = yOnly(basisDateStr)
       const cur = byYearMap.get(key) || { total: 0, ht: 0, tva: 0, count: 0 }
-      cur.total += toNum(ed.total_amount)
-      cur.ht += toNum(ed.subtotal)
-      cur.tva += toNum(ed.tax_amount)
+      const alloc = allocatedMap.get(String((r as any).id))
+      if (alloc) {
+        cur.total += alloc.total
+        cur.ht += alloc.ht
+        cur.tva += alloc.tva
+      } else {
+        cur.total += toNum(ed.total_amount)
+        cur.ht += toNum(ed.subtotal)
+        cur.tva += toNum(ed.tax_amount)
+      }
       cur.count += 1
       byYearMap.set(key, cur)
     }
@@ -172,7 +229,7 @@ export async function GET(request: NextRequest) {
 
     // supplierMetaMap déjà chargé ci-dessus
 
-    for (const r of filtered as any[]) {
+    for (const r of filteredByAlloc as any[]) {
       const ed = r.extracted_data || {}
       const hasSupplierId = !!r.supplier_id
       let key = ''
@@ -209,9 +266,16 @@ export async function GET(request: NextRequest) {
       }
 
       const cur = bySupplierMap.get(key) || { total: 0, ht: 0, tva: 0, count: 0 }
-      cur.total += toNum(ed.total_amount)
-      cur.ht += toNum(ed.subtotal)
-      cur.tva += toNum(ed.tax_amount)
+      const alloc = allocatedMap.get(String((r as any).id))
+      if (alloc) {
+        cur.total += alloc.total
+        cur.ht += alloc.ht
+        cur.tva += alloc.tva
+      } else {
+        cur.total += toNum(ed.total_amount)
+        cur.ht += toNum(ed.subtotal)
+        cur.tva += toNum(ed.tax_amount)
+      }
       cur.count += 1
       bySupplierMap.set(key, cur)
     }
@@ -251,15 +315,22 @@ export async function GET(request: NextRequest) {
       if (isMaterial) return 'Matériel'
       return 'Nourriture'
     }
-    for (const r of filtered as any[]) {
+    for (const r of filteredByAlloc as any[]) {
       const ed = r.extracted_data || {}
       const base = supplierToBase(String(ed.supplier_name || ''))
-      const rate = approxVat(Number(ed.subtotal), Number(ed.tax_amount))
+      const alloc = allocatedMap.get(String((r as any).id))
+      const rate = alloc ? approxVat(Number(alloc.ht), Number(alloc.tva)) : approxVat(Number(ed.subtotal), Number(ed.tax_amount))
       const key = rate ? `${base} ${rate}%` : base
       const cur = byCategoryMap.get(key) || { total: 0, ht: 0, tva: 0, count: 0 }
-      cur.total += toNum(ed.total_amount)
-      cur.ht += toNum(ed.subtotal)
-      cur.tva += toNum(ed.tax_amount)
+      if (alloc) {
+        cur.total += alloc.total
+        cur.ht += alloc.ht
+        cur.tva += alloc.tva
+      } else {
+        cur.total += toNum(ed.total_amount)
+        cur.ht += toNum(ed.subtotal)
+        cur.tva += toNum(ed.tax_amount)
+      }
       cur.count += 1
       byCategoryMap.set(key, cur)
     }
@@ -268,7 +339,20 @@ export async function GET(request: NextRequest) {
       .sort((a, b) => b.total - a.total)
 
     // Anciennes clés gardées vides pour compat
-    return NextResponse.json({ success: true, group, byGroup, byMonth: [], byYear, bySupplier, byCategory })
+    const byAccount = Array.from(byAccountMap.entries())
+      .map(([account, v]) => ({ account, ...v }))
+      .sort((a, b) => b.total - a.total)
+    const byVat = Array.from(byVatMap.entries())
+      .map(([vat, v]) => ({ vat, ...v }))
+      .sort((a, b) => b.total - a.total)
+
+    const coverage = {
+      invoicesAllocated: Array.from(allocatedMap.keys()).length,
+      invoicesTotal: filtered.length,
+      invoicesUnallocated: filtered.length - Array.from(allocatedMap.keys()).length
+    }
+
+    return NextResponse.json({ success: true, group, byGroup, byMonth: [], byYear, bySupplier, byCategory, byAccount, byVat, coverage })
   } catch (error) {
     console.error('Erreur stats:', error)
     return NextResponse.json({ error: 'Erreur lors du calcul des stats' }, { status: 500 })
