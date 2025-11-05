@@ -208,6 +208,11 @@ export async function PUT(
     console.log('🔍 [API] Invoice ID:', invoiceId)
     console.log('🔍 [API] User ID:', user.id)
     if (Array.isArray(allocations)) {
+      // Validation: aucun compte vide
+      const hasEmpty = allocations.some((a: any) => !String(a?.account_code || '').trim())
+      if (hasEmpty) {
+        return NextResponse.json({ error: 'Compte comptable requis pour chaque ligne de ventilation.' }, { status: 400 })
+      }
       try {
         console.log('🔍 [API] Suppression des anciennes allocations...')
         const { data: delData, error: delErr } = await supabaseAdmin
