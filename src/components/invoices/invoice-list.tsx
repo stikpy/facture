@@ -77,6 +77,11 @@ export function InvoiceList({ from, to }: { from?: string; to?: string }) {
   const [pageSize, setPageSize] = useState(20)
   const [allocFilter, setAllocFilter] = useState<'all' | 'allocated' | 'unallocated'>('all')
   const [allocatedMap, setAllocatedMap] = useState<Record<string, boolean>>({})
+  const unallocatedCount = useMemo(() => {
+    try {
+      return rawInvoices.filter((inv: any) => !allocatedMap[(inv as any).id]).length
+    } catch { return 0 }
+  }, [rawInvoices, allocatedMap])
   const router = useRouter()
 
   const formatShortDate = (iso?: string) => {
@@ -470,7 +475,12 @@ export function InvoiceList({ from, to }: { from?: string; to?: string }) {
               size="sm"
               onClick={() => setAllocFilter(key as any)}
             >
-              {label}
+              <span className="flex items-center gap-2">
+                <span>{label}</span>
+                {key === 'unallocated' && (
+                  <span className="inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full text-[11px] font-medium bg-amber-100 text-amber-800 border border-amber-300">{unallocatedCount}</span>
+                )}
+              </span>
             </Button>
           ))}
           <Button variant="outline" size="sm" onClick={handleBulkDelete} disabled={Object.values(selected).filter(Boolean).length===0}>Supprimer sélection</Button>
