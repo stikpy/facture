@@ -266,6 +266,11 @@ export default function SuppliersPage() {
 
       if (orgId) {
         query = query.eq('organization_id', orgId)
+      } else {
+        // Pas d'organisation → aucune donnée visible
+        setSuppliers([])
+        setLoading(false)
+        return
       }
 
       const { data, error } = await query

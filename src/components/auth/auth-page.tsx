@@ -12,6 +12,7 @@ export function AuthPage() {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [fullName, setFullName] = useState('')
+  const [orgName, setOrgName] = useState('')
   const [magicLinkSent, setMagicLinkSent] = useState(false)
 
   const handleAuth = async (e: React.FormEvent) => {
@@ -55,6 +56,7 @@ export function AuthPage() {
           options: {
             data: {
               full_name: fullName,
+              pending_org_name: orgName,
             }
           }
         })
@@ -67,7 +69,9 @@ export function AuthPage() {
         }
         
         console.log('✅ [AUTH] Inscription réussie, vérifiez votre email')
-        alert('Vérifiez votre email pour confirmer votre compte')
+        // Mémoriser localement le nom d'organisation pour création post-login
+        try { localStorage.setItem('pending_org_name', orgName || '') } catch {}
+        alert('Vérifiez votre email pour confirmer votre compte. Votre organisation sera créée à la première connexion.')
       } else {
         console.log('🔑 [AUTH] Tentative de connexion par mot de passe')
         const { data, error } = await supabase.auth.signInWithPassword({
@@ -89,6 +93,19 @@ export function AuthPage() {
         console.log('🔍 [AUTH] Utilisateur après connexion:', currentUser ? `${currentUser.email} (${currentUser.id})` : 'Non connecté')
         
         if (currentUser) {
+          // Créer l'organisation si besoin
+          try {
+            const pending = (localStorage.getItem('pending_org_name') || '').trim()
+            const orgsRes = await fetch('/api/orgs')
+            if (orgsRes.ok) {
+              const j = await orgsRes.json()
+              const hasOrg = Array.isArray(j.organizations) && j.organizations.length > 0
+              if (!hasOrg && pending) {
+                await fetch('/api/orgs', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: pending }) })
+                localStorage.removeItem('pending_org_name')
+              }
+            }
+          } catch {}
           console.log('🔄 [AUTH] Redirection vers le dashboard...')
           // Rediriger vers le dashboard après connexion réussie
           setTimeout(() => {
@@ -181,6 +198,22 @@ export function AuthPage() {
                   required={isSignUp && !useMagicLink}
                   value={fullName}
                   onChange={(e) => setFullName(e.target.value)}
+                  className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-primary focus:border-primary"
+                />
+              </div>
+            )}
+            {isSignUp && !useMagicLink && (
+              <div>
+                <label htmlFor="orgName" className="block text-sm font-medium text-gray-700">
+                  Nom de l'organisation
+                </label>
+                <input
+                  id="orgName"
+                  name="orgName"
+                  type="text"
+                  required={isSignUp && !useMagicLink}
+                  value={orgName}
+                  onChange={(e) => setOrgName(e.target.value)}
                   className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-primary focus:border-primary"
                 />
               </div>
