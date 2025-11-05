@@ -15,6 +15,7 @@ type ByGroup = { period: string; total: number; ht: number; tva: number; count: 
 type ByYear = { year: string; total: number; ht: number; tva: number; count: number }
 type BySupplier = { supplier: string; supplierCode?: string; supplierId?: string; total: number; ht: number; tva: number; count: number }
 type ByCategory = { category: string; total: number; ht: number; tva: number; count: number }
+type ByCenter = { center: string; total: number; ht: number; tva: number; count: number }
 type ByAccount = { account: string; total: number; ht: number; tva: number; count: number }
 type ByVat = { vat: string; total: number; ht: number; tva: number; count: number }
 type Coverage = { invoicesAllocated: number; invoicesUnallocated: number; invoicesTotal: number }
@@ -29,6 +30,7 @@ export default function StatsPage() {
   const [byYear, setByYear] = useState<ByYear[]>([])
   const [bySupplier, setBySupplier] = useState<BySupplier[]>([])
   const [byCategory, setByCategory] = useState<ByCategory[]>([])
+  const [byCenter, setByCenter] = useState<ByCenter[]>([])
   const [byAccount, setByAccount] = useState<ByAccount[]>([])
   const [byVat, setByVat] = useState<ByVat[]>([])
   const [coverage, setCoverage] = useState<Coverage | null>(null)
@@ -73,6 +75,7 @@ export default function StatsPage() {
       setByYear(json.byYear || [])
       setBySupplier(json.bySupplier || [])
       setByCategory(json.byCategory || [])
+      setByCenter(json.byCenter || [])
       setDebugJson(json)
       setByAccount(json.byAccount || [])
       setByVat(json.byVat || [])
@@ -367,54 +370,50 @@ export default function StatsPage() {
             </div>
           )}
 
-          <section className='space-y-4'>
-            <div className='flex items-center justify-between'>
-              <h2 className='text-lg font-medium'>Dépenses par centre</h2>
-              <button
-                className='text-sm text-primary hover:underline'
-                onClick={() => downloadCsv('depenses_par_centre', byCategory, ['category', 'total', 'ht', 'tva', 'count'])}
-              >
-                Export CSV
-              </button>
-            </div>
-
-            <div className='h-64 w-full border rounded-md bg-white p-2'>
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={byCategory.slice(0, 10)} layout='vertical' margin={{ top: 10, right: 20, left: 40, bottom: 0 }}>
-                  <CartesianGrid strokeDasharray="3 3" />
-                  <XAxis type='number' />
-                  <YAxis type='category' dataKey='category' width={260} />
-                  <Tooltip formatter={(v: any) => typeof v === 'number' ? numberFmt.format(v) : v} />
-                  <Bar dataKey='total' name='Total dépensé' fill='#7c3aed' />
-                </BarChart>
-              </ResponsiveContainer>
-            </div>
-
-            <div className='overflow-auto border rounded-md'>
-              <table className='min-w-full text-sm'>
-                <thead className='bg-gray-50'>
-                  <tr>
-                    <th className='text-left px-4 py-2'>Centre</th>
-                    <th className='text-right px-4 py-2'>Total</th>
-                    <th className='text-right px-4 py-2'>HT</th>
-                    <th className='text-right px-4 py-2'>TVA</th>
-                    <th className='text-right px-4 py-2'>#</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {byCategory.map((r) => (
-                    <tr key={r.category} className='border-t'>
-                      <td className='px-4 py-2'>{r.category}</td>
-                      <td className='px-4 py-2 text-right'>{numberFmt.format(r.total)}</td>
-                      <td className='px-4 py-2 text-right'>{numberFmt.format(r.ht)}</td>
-                      <td className='px-4 py-2 text-right'>{numberFmt.format(r.tva)}</td>
-                      <td className='px-4 py-2 text-right'>{r.count}</td>
+          {byCenter.length > 0 && (
+            <section className='space-y-4'>
+              <div className='flex items-center justify-between'>
+                <h2 className='text-lg font-medium'>Dépenses par centre (ventilations)</h2>
+                <button className='text-sm text-primary hover:underline' onClick={() => downloadCsv('depenses_par_centre', byCenter, ['center','total','ht','tva','count'])}>Export CSV</button>
+              </div>
+              <div className='h-64 w-full border rounded-md bg-white p-2'>
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={byCenter.slice(0, 12)} layout='vertical' margin={{ top: 10, right: 20, left: 40, bottom: 0 }}>
+                    <CartesianGrid strokeDasharray="3 3" />
+                    <XAxis type='number' />
+                    <YAxis type='category' dataKey='center' width={260} />
+                    <Tooltip formatter={(v: any) => typeof v === 'number' ? numberFmt.format(v) : v} />
+                    <Legend />
+                    <Bar dataKey='total' name='Total ventilé' fill='#7c3aed' />
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+              <div className='overflow-auto border rounded-md'>
+                <table className='min-w-full text-sm'>
+                  <thead className='bg-gray-50'>
+                    <tr>
+                      <th className='text-left px-4 py-2'>Centre</th>
+                      <th className='text-right px-4 py-2'>Total</th>
+                      <th className='text-right px-4 py-2'>HT</th>
+                      <th className='text-right px-4 py-2'>TVA</th>
+                      <th className='text-right px-4 py-2'>#</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </section>
+                  </thead>
+                  <tbody>
+                    {byCenter.map((r) => (
+                      <tr key={r.center} className='border-t'>
+                        <td className='px-4 py-2'>{r.center}</td>
+                        <td className='px-4 py-2 text-right'>{numberFmt.format(r.total)}</td>
+                        <td className='px-4 py-2 text-right'>{numberFmt.format(r.ht)}</td>
+                        <td className='px-4 py-2 text-right'>{numberFmt.format(r.tva)}</td>
+                        <td className='px-4 py-2 text-right'>{r.count}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </section>
+          )}
 
           <section className='space-y-4'>
             <div className='flex items-center justify-between'>
