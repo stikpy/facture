@@ -18,7 +18,7 @@ type ByCategory = { category: string; total: number; ht: number; tva: number; co
 type ByCenter = { center: string; total: number; ht: number; tva: number; count: number }
 type ByAccount = { account: string; total: number; ht: number; tva: number; count: number }
 type ByVat = { vat: string; total: number; ht: number; tva: number; count: number }
-type Coverage = { invoicesAllocated: number; invoicesUnallocated: number; invoicesTotal: number }
+type Coverage = { invoicesAllocated: number; invoicesUnallocated: number; invoicesTotal: number; totals?: { ht: number; tva: number; total: number; count: number }; unassignedAllocations?: { ht: number; tva: number; total: number; count: number; invoices: string[] } }
 
 type SortDir = 'asc' | 'desc'
 
