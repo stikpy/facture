@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, type ChangeEvent } from 'react'
 import { useParams, useRouter, useSearchParams } from 'next/navigation'
 import Link from 'next/link'
 import { createClient } from '@/utils/supabase/client'
@@ -70,6 +70,7 @@ interface AllocationFormRow {
   account_code: string
   label: string
   amount: number
+  amount_input: string
   vat_code?: string
   vat_rate?: number
 }
@@ -150,6 +151,44 @@ export default function InvoiceEditPage() {
     return round2((Number(row.amount || 0) * rate) / 100)
   }
   const totalForRow = (row: AllocationFormRow) => round2(Number(row.amount || 0) + taxForRow(row))
+  const normalizeDecimalInput = (value: string) => {
+    if (value == null) return ''
+    let sanitized = value.replace(/\s+/g, '')
+    sanitized = sanitized.replace(/,/g, '.')
+    sanitized = sanitized.replace(/[^0-9.-]/g, '')
+    if (sanitized.startsWith('.')) sanitized = `0${sanitized}`
+    const firstDot = sanitized.indexOf('.')
+    if (firstDot !== -1) {
+      sanitized = sanitized.slice(0, firstDot + 1) + sanitized.slice(firstDot + 1).replace(/\./g, '')
+    }
+    const minusIndex = sanitized.indexOf('-')
+    if (minusIndex > 0) {
+      sanitized = sanitized.replace(/-/g, '')
+    } else if (minusIndex === 0) {
+      sanitized = `-${sanitized.slice(1).replace(/-/g, '')}`
+    }
+    if (sanitized === '-') return ''
+    return sanitized
+  }
+  const parseDecimalInput = (value: string): number | undefined => {
+    if (!value) return undefined
+    const parsed = Number(value)
+    return Number.isFinite(parsed) ? parsed : undefined
+  }
+  const formatDecimalForInput = (value: string | number | null | undefined) => {
+    if (value === null || value === undefined || value === '') return ''
+    return normalizeDecimalInput(String(value))
+  }
+  const isEditableElement = (element: Element | null) => {
+    if (!element) return false
+    const el = element as HTMLElement
+    if (el.isContentEditable) return true
+    const tag = el.tagName?.toLowerCase()
+    if (!tag) return false
+    if (['input', 'textarea', 'select'].includes(tag)) return true
+    const role = el.getAttribute('role')
+    return role === 'textbox' || role === 'combobox'
+  }
 
   useEffect(() => {
     const handleMouseMove = (e: MouseEvent) => {
@@ -247,9 +286,9 @@ export default function InvoiceEditPage() {
         }
         setDocDate(toYmd(invDate))
         setDueDate(toYmd(due))
-        setSubtotal(String(data.invoice?.extracted_data?.subtotal ?? ''))
-        setTaxAmount(String(data.invoice?.extracted_data?.tax_amount ?? ''))
-        setTotalAmount(String(data.invoice?.extracted_data?.total_amount ?? ''))
+        setSubtotal(formatDecimalForInput(data.invoice?.extracted_data?.subtotal))
+        setTaxAmount(formatDecimalForInput(data.invoice?.extracted_data?.tax_amount))
+        setTotalAmount(formatDecimalForInput(data.invoice?.extracted_data?.total_amount))
         try {
           if (data.invoice?.file_path) {
             console.log('🔍 [PDF] Chemin du fichier:', data.invoice.file_path)
@@ -267,13 +306,18 @@ export default function InvoiceEditPage() {
           setPdfUrl(null)
         }
         console.log('🔍 [ALLOCATIONS] Données reçues:', data.allocations)
-        const incoming = (data.allocations || []).map((a: any) => ({
-          account_code: a.account_code || '',
-          label: a.label || '',
-          amount: a.amount || 0,
-          vat_code: a.vat_code || '',
-          vat_rate: a.vat_rate != null ? Number(a.vat_rate) : undefined,
-        }))
+        const incoming = (data.allocations || []).map((a: any) => {
+          const amountInput = formatDecimalForInput(a.amount)
+          const amountNumber = parseDecimalInput(amountInput) ?? 0
+          return {
+            account_code: a.account_code || '',
+            label: a.label || '',
+            amount: amountNumber,
+            amount_input: amountInput,
+            vat_code: a.vat_code || '',
+            vat_rate: a.vat_rate != null ? Number(a.vat_rate) : undefined,
+          }
+        })
         console.log('🔍 [ALLOCATIONS] Ventilations formatées:', incoming)
         if (incoming.length > 0) {
           setAllocations(incoming)
@@ -293,9 +337,9 @@ export default function InvoiceEditPage() {
           invoiceNumber: data.invoice?.extracted_data?.invoice_number || '',
           invoiceDate: toYmd(invDate),
           dueDate: toYmd(due),
-          subtotal: String(data.invoice?.extracted_data?.subtotal ?? ''),
-          taxAmount: String(data.invoice?.extracted_data?.tax_amount ?? ''),
-          totalAmount: String(data.invoice?.extracted_data?.total_amount ?? ''),
+          subtotal: formatDecimalForInput(data.invoice?.extracted_data?.subtotal),
+          taxAmount: formatDecimalForInput(data.invoice?.extracted_data?.tax_amount),
+          totalAmount: formatDecimalForInput(data.invoice?.extracted_data?.total_amount),
           allocations: incoming,
         })
         setInitialSignature(initSig)
@@ -448,6 +492,8 @@ export default function InvoiceEditPage() {
   // Navigation clavier ← →
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      const target = (e.target as Element) || null
+      if (isEditableElement(target) || isEditableElement(document.activeElement)) return
       if (e.key === 'ArrowLeft' && prevId) {
         e.preventDefault()
         router.push(`/invoices/${prevId}${ctxSupplierId ? `?ctx=supplier&supplier_id=${ctxSupplierId}` : ''}`)
@@ -482,7 +528,7 @@ export default function InvoiceEditPage() {
     setIsDirty(currentSig !== initialSignature)
   }, [supplierId, supplierName, description, clientName, invoiceNumber, docDate, dueDate, subtotal, taxAmount, totalAmount, allocations, initialSignature])
 
-  const addRow = () => setAllocations((prev) => [...prev, { account_code: '', label: '', amount: 0 }])
+  const addRow = () => setAllocations((prev) => [...prev, { account_code: '', label: '', amount: 0, amount_input: '' }])
   const removeRow = (idx: number) => setAllocations((prev) => prev.filter((_, i) => i !== idx))
   const updateRow = (idx: number, patch: Partial<AllocationFormRow>) =>
     setAllocations((prev) => prev.map((r, i) => (i === idx ? { ...r, ...patch } : r)))
@@ -492,6 +538,9 @@ export default function InvoiceEditPage() {
     try {
       // Autoriser la sauvegarde même sans supplierId pour saisie manuelle
       const { data: { session } } = await supabase.auth.getSession()
+      const subtotalValue = parseDecimalInput(subtotal)
+      const taxAmountValue = parseDecimalInput(taxAmount)
+      const totalAmountValue = parseDecimalInput(totalAmount)
       const response = await fetch(`/api/invoices/${params.id}`, {
         method: 'PUT',
         headers: {
@@ -507,9 +556,9 @@ export default function InvoiceEditPage() {
           invoice_number: invoiceNumber || undefined,
           invoice_date: docDate || undefined,
           due_date: dueDate || undefined,
-          subtotal: subtotal !== '' ? Number(subtotal) : undefined,
-          tax_amount: taxAmount !== '' ? Number(taxAmount) : undefined,
-          total_amount: totalAmount !== '' ? Number(totalAmount) : undefined,
+          subtotal: subtotalValue,
+          tax_amount: taxAmountValue,
+          total_amount: totalAmountValue,
           // Dès que l'utilisateur enregistre des propriétés, considérer la saisie manuelle
           manual_mode: true,
         }),
@@ -526,9 +575,9 @@ export default function InvoiceEditPage() {
             invoice_number: invoiceNumber,
             invoice_date: docDate,
             due_date: dueDate,
-            subtotal: subtotal !== '' ? Number(subtotal) : prev?.extracted_data?.subtotal,
-            tax_amount: taxAmount !== '' ? Number(taxAmount) : prev?.extracted_data?.tax_amount,
-            total_amount: totalAmount !== '' ? Number(totalAmount) : prev?.extracted_data?.total_amount,
+            subtotal: subtotalValue ?? prev?.extracted_data?.subtotal,
+            tax_amount: taxAmountValue ?? prev?.extracted_data?.tax_amount,
+            total_amount: totalAmountValue ?? prev?.extracted_data?.total_amount,
           }
         }))
         // passer en awaiting_user côté UI (mode manuel)
@@ -554,7 +603,7 @@ export default function InvoiceEditPage() {
       
       // Sauvegarder les allocations telles qu'elles sont saisies (sans dérivation automatique)
       console.log('🔍 [SAVE] Allocations avant sauvegarde:', allocations)
-      const derived: AllocationFormRow[] = allocations.map(row => ({
+      const derived = allocations.map(row => ({
         account_code: row.account_code,
         label: row.label,
         amount: round2(Number(row.amount || 0)),
@@ -570,6 +619,9 @@ export default function InvoiceEditPage() {
         setSaving(false)
         return
       }
+      const subtotalValue = parseDecimalInput(subtotal)
+      const taxAmountValue = parseDecimalInput(taxAmount)
+      const totalAmountValue = parseDecimalInput(totalAmount)
       // Utilise le client Supabase déjà initialisé
       const { data: { session } } = await supabase.auth.getSession()
       const res = await fetch(`/api/invoices/${params.id}`, {
@@ -587,9 +639,9 @@ export default function InvoiceEditPage() {
           invoice_number: invoiceNumber || undefined,
           invoice_date: docDate || undefined,
           due_date: dueDate || undefined,
-          subtotal: subtotal !== '' ? Number(subtotal) : undefined,
-          tax_amount: taxAmount !== '' ? Number(taxAmount) : undefined,
-          total_amount: totalAmount !== '' ? Number(totalAmount) : undefined,
+          subtotal: subtotalValue,
+          tax_amount: taxAmountValue,
+          total_amount: totalAmountValue,
           allocations: derived
         }),
       })
@@ -1276,7 +1328,12 @@ export default function InvoiceEditPage() {
                 <div>
                   <div className="text-gray-500">Montant de base</div>
                   {isEditingProps ? (
-                    <Input type="number" step="0.01" value={subtotal} onChange={(e: any) => setSubtotal(e.target.value)} />
+                    <Input
+                      type="text"
+                      inputMode="decimal"
+                      value={subtotal}
+                      onChange={(e) => setSubtotal(normalizeDecimalInput(e.target.value))}
+                    />
                   ) : (
                   <div className="font-medium">{(invoice?.extracted_data?.subtotal ?? 0).toFixed(2)} €</div>
                   )}
@@ -1284,7 +1341,12 @@ export default function InvoiceEditPage() {
                 <div>
                   <div className="text-gray-500">Montant de taxe</div>
                   {isEditingProps ? (
-                    <Input type="number" step="0.01" value={taxAmount} onChange={(e: any) => setTaxAmount(e.target.value)} />
+                    <Input
+                      type="text"
+                      inputMode="decimal"
+                      value={taxAmount}
+                      onChange={(e) => setTaxAmount(normalizeDecimalInput(e.target.value))}
+                    />
                   ) : (
                   <div className="font-medium">{(invoice?.extracted_data?.tax_amount ?? 0).toFixed(2)} €</div>
                   )}
@@ -1292,7 +1354,12 @@ export default function InvoiceEditPage() {
                 <div>
                   <div className="text-gray-500">Montant total</div>
                   {isEditingProps ? (
-                    <Input type="number" step="0.01" value={totalAmount} onChange={(e: any) => setTotalAmount(e.target.value)} />
+                    <Input
+                      type="text"
+                      inputMode="decimal"
+                      value={totalAmount}
+                      onChange={(e) => setTotalAmount(normalizeDecimalInput(e.target.value))}
+                    />
                   ) : (
                   <div className="font-medium">{(invoice?.extracted_data?.total_amount ?? 0).toFixed(2)} €</div>
                   )}
@@ -1310,7 +1377,7 @@ export default function InvoiceEditPage() {
                             }
                             setShowSupplierDropdown(true)
                           }}
-                          onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
+                          onChange={(e: ChangeEvent<HTMLInputElement>) => {
                             const v = e.target.value
                             setSupplierName(v)
                             setSupplierId(null)
@@ -1447,7 +1514,7 @@ export default function InvoiceEditPage() {
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block text-xs text-gray-500 mb-1">Description</label>
-                  <Input value={description} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setDescription(e.target.value)} placeholder="Description de la facture" />
+                  <Input value={description} onChange={(e: ChangeEvent<HTMLInputElement>) => setDescription(e.target.value)} placeholder="Description de la facture" />
                 </div>
               </div>
             </div>
@@ -1522,7 +1589,7 @@ export default function InvoiceEditPage() {
                         <label className="block text-xs font-medium text-gray-700 mb-1">Libellé</label>
                         <Input 
                           value={row.label} 
-                          onChange={(e: React.ChangeEvent<HTMLInputElement>) => updateRow(idx, { label: e.target.value })} 
+                          onChange={(e: ChangeEvent<HTMLInputElement>) => updateRow(idx, { label: e.target.value })}
                           placeholder="Libellé de la ligne"
                           className="h-9 border-gray-300 hover:border-gray-400 transition-colors"
                         />
@@ -1573,11 +1640,15 @@ export default function InvoiceEditPage() {
                       <div className="col-span-2">
                         <label className="block text-xs font-medium text-gray-700 mb-1">Montant HT</label>
                         <div className="relative">
-                          <Input 
-                            type="number" 
-                            step="0.01" 
-                            value={row.amount} 
-                            onChange={(e: React.ChangeEvent<HTMLInputElement>) => updateRow(idx, { amount: Number(e.target.value) })}
+                          <Input
+                            type="text"
+                            inputMode="decimal"
+                            value={row.amount_input}
+                            onChange={(e: ChangeEvent<HTMLInputElement>) => {
+                              const normalized = normalizeDecimalInput(e.target.value)
+                              const parsed = parseDecimalInput(normalized)
+                              updateRow(idx, { amount_input: normalized, amount: parsed ?? 0 })
+                            }}
                             className="h-9 pr-8 text-right border-gray-300 hover:border-gray-400 transition-colors font-medium"
                             placeholder="0.00"
                           />
