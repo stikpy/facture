@@ -681,11 +681,12 @@ export default function InvoiceEditPage() {
     try {
       setSearchingSuppliers(true)
       // Utilise le client Supabase déjà initialisé
-      const { data } = await (supabase
+      let q = (supabase
         .from('suppliers')
-        .select('id, code, display_name')
-        .order('display_name')
-        .limit(20) as any)
+        .select('id, code, display_name') as any)
+      const orgId = (invoice as any)?.organization_id
+      if (orgId) q = q.eq('organization_id', orgId)
+      const { data } = await q.order('display_name').limit(20)
       setSupplierOptions((data || []) as any)
     } catch (error) {
       console.error('Erreur lors du chargement des fournisseurs:', error)
@@ -704,11 +705,12 @@ export default function InvoiceEditPage() {
       
       // Recherche plus intelligente : nom, code, et mots-clés
       const searchTerms = q.toLowerCase().trim().split(/\s+/)
-      let query = supabase
+      let query = (supabase
         .from('suppliers')
-        .select('id, code, display_name')
-        .order('display_name')
-        .limit(20)
+        .select('id, code, display_name') as any)
+      const orgId = (invoice as any)?.organization_id
+      if (orgId) query = query.eq('organization_id', orgId)
+      query = query.order('display_name').limit(20)
       
       if (searchTerms.length === 1) {
         // Recherche simple : nom ou code

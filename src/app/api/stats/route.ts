@@ -76,9 +76,11 @@ export async function GET(request: NextRequest) {
     // Précharger les métadonnées fournisseurs pour filtrage et regroupement
     let supplierMetaMap = new Map<string, { code?: string; name: string; normalized?: string }>()
     {
-      const { data: supplierRows } = await (supabaseAdmin as any)
+      let supQuery = (supabaseAdmin as any)
         .from('suppliers')
         .select('id, code, display_name, normalized_key')
+      if (orgId) supQuery = supQuery.eq('organization_id', orgId)
+      const { data: supplierRows } = await supQuery
       for (const s of (supplierRows as any[]) || []) {
         supplierMetaMap.set(String((s as any).id), { code: (s as any).code, name: (s as any).display_name, normalized: (s as any).normalized_key })
       }
