@@ -94,6 +94,7 @@ export default function InvoiceEditPage() {
   const [supplierCode, setSupplierCode] = useState('')
   const [supplierValidationStatus, setSupplierValidationStatus] = useState<string | null>(null)
   const [orgAccounts, setOrgAccounts] = useState<Array<{ code: string; label: string }>>([])
+  const [orgVatCodes, setOrgVatCodes] = useState<Array<{ code: string; label: string; rate?: number }>>([])
 
   // Fonction pour uniformiser le texte (Title Case)
   const formatText = (text: string) => {
@@ -138,6 +139,9 @@ export default function InvoiceEditPage() {
   const [nextId, setNextId] = useState<string | null>(null)
   const round2 = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100
   const vatRateFromCode = (code?: string) => {
+    if (!code) return 0
+    const fromOrg = orgVatCodes.find(v => v.code === code)
+    if (fromOrg) return Number(fromOrg.rate || 0)
     const v = findVatByCode(code)
     return v?.rate ?? 0
   }
@@ -333,7 +337,7 @@ export default function InvoiceEditPage() {
     fetchData()
   }, [params.id, router, ctxSupplierId])
 
-  // Charger les comptes de l'organisation pour enrichir la liste
+  // Charger les comptes de l'organisation et les codes TVA pour enrichir la liste
   useEffect(() => {
     const loadOrgAccounts = async () => {
       try {
@@ -344,7 +348,17 @@ export default function InvoiceEditPage() {
         }
       } catch {}
     }
+    const loadOrgVat = async () => {
+      try {
+        const res = await fetch('/api/orgs/vat')
+        const data = await res.json()
+        if (res.ok) {
+          setOrgVatCodes((data.vatCodes || []).map((v: any) => ({ code: v.code, label: v.label, rate: Number(v.rate) })))
+        }
+      } catch {}
+    }
     loadOrgAccounts()
+    loadOrgVat()
   }, [])
 
   // Charger / sauvegarder la rotation d'aperçu (par facture) en localStorage
@@ -1455,46 +1469,51 @@ export default function InvoiceEditPage() {
                           className="w-full h-9 border border-gray-300 rounded-md px-3 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white hover:border-gray-400 transition-colors"
                           value={row.account_code}
                           title={(() => {
+                            const aOrg = orgAccounts.find(p => p.code === (row.account_code || ''))
+                            if (aOrg) return `${aOrg.code} — ${aOrg.label}`
                             const a = HOTEL_RESTAURANT_ACCOUNTS.find(p => p.code === (row.account_code || ''))
                             return a ? `${a.code} — ${a.label}` : 'Sélectionner un compte'
                           })()}
                           onChange={(e) => updateRow(idx, { account_code: e.target.value })}
                         >
                           <option value="" className="text-gray-400">Sélectionner un compte</option>
-                          {orgAccounts.length > 0 && (
+                          {orgAccounts.length > 0 ? (
                             <optgroup label="Comptes organisation">
                               {orgAccounts.map((a) => (
                                 <option key={`org-${a.code}`} value={a.code}>{a.code} - {a.label}</option>
                               ))}
                             </optgroup>
+                          ) : (
+                            <>
+                              <optgroup label="Achats et approvisionnements">
+                                <option value="601">601 - Matières premières</option>
+                                <option value="602">602 - Autres approvisionnements</option>
+                                <option value="606">606 - Fournitures</option>
+                                <option value="6061">6061 - Eau, énergie</option>
+                                <option value="6063">6063 - Entretien et petit équipement</option>
+                                <option value="6064">6064 - Fournitures administratives</option>
+                                <option value="6068">6068 - Autres fournitures</option>
+                                <option value="607">607 - Marchandises (alimentaire, boissons)</option>
+                              </optgroup>
+                              <optgroup label="Services extérieurs">
+                                <option value="611">611 - Sous-traitance</option>
+                                <option value="613">613 - Locations</option>
+                                <option value="615">615 - Entretien et réparations</option>
+                                <option value="622">622 - Honoraires</option>
+                                <option value="623">623 - Publicité et marketing</option>
+                                <option value="624">624 - Transports</option>
+                                <option value="6251">6251 - Voyages et déplacements</option>
+                                <option value="6256">6256 - Missions</option>
+                                <option value="6257">6257 - Réceptions</option>
+                                <option value="626">626 - Télécommunications</option>
+                                <option value="627">627 - Services bancaires</option>
+                                <option value="628">628 - Autres services</option>
+                              </optgroup>
+                              <optgroup label="TVA">
+                                <option value="44566">44566 - TVA déductible</option>
+                              </optgroup>
+                            </>
                           )}
-                          <optgroup label="Achats et approvisionnements">
-                            <option value="601">601 - Matières premières</option>
-                            <option value="602">602 - Autres approvisionnements</option>
-                            <option value="606">606 - Fournitures</option>
-                            <option value="6061">6061 - Eau, énergie</option>
-                            <option value="6063">6063 - Entretien et petit équipement</option>
-                            <option value="6064">6064 - Fournitures administratives</option>
-                            <option value="6068">6068 - Autres fournitures</option>
-                            <option value="607">607 - Marchandises (alimentaire, boissons)</option>
-                          </optgroup>
-                          <optgroup label="Services extérieurs">
-                            <option value="611">611 - Sous-traitance</option>
-                            <option value="613">613 - Locations</option>
-                            <option value="615">615 - Entretien et réparations</option>
-                            <option value="622">622 - Honoraires</option>
-                            <option value="623">623 - Publicité et marketing</option>
-                            <option value="624">624 - Transports</option>
-                            <option value="6251">6251 - Voyages et déplacements</option>
-                            <option value="6256">6256 - Missions</option>
-                            <option value="6257">6257 - Réceptions</option>
-                            <option value="626">626 - Télécommunications</option>
-                            <option value="627">627 - Services bancaires</option>
-                            <option value="628">628 - Autres services</option>
-                          </optgroup>
-                          <optgroup label="TVA">
-                            <option value="44566">44566 - TVA déductible</option>
-                          </optgroup>
                         </select>
                       </div>
 
@@ -1516,25 +1535,37 @@ export default function InvoiceEditPage() {
                           className="w-full h-9 border border-gray-300 rounded-md px-3 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white hover:border-gray-400 transition-colors"
                           value={row.vat_code || ''}
                           title={(() => {
+                            const vOrg = orgVatCodes.find(p => p.code === (row.vat_code || ''))
+                            if (vOrg) return `${vOrg.code} — ${vOrg.label} (${vOrg.rate}%)`
                             const v = VAT_PRESETS.find(p => p.code === (row.vat_code || ''))
                             return v ? `${v.code} — ${v.label} (${v.rate}%)` : 'Sans TVA'
                           })()}
                           onChange={(e) => updateRow(idx, { vat_code: e.target.value })}
                         >
                           <option value="" className="text-gray-400">Sans TVA</option>
-                          <optgroup label="TVA Taux normal (20%)">
-                            <option value="002">002 - TVA déductible B&S</option>
-                            <option value="B5">B5 - TVA déductible Prestations</option>
-                            <option value="I5">I5 - TVA Immobilisations</option>
-                          </optgroup>
-                          <optgroup label="TVA Taux intermédiaire (10%)">
-                            <option value="A6">A6 - TVA déductible B&S</option>
-                            <option value="B6">B6 - TVA déductible Prestations</option>
-                          </optgroup>
-                          <optgroup label="TVA Taux réduit (5.5%)">
-                            <option value="A2">A2 - TVA déductible B&S</option>
-                            <option value="B2">B2 - TVA déductible Prestations</option>
-                          </optgroup>
+                          {orgVatCodes.length > 0 ? (
+                            <optgroup label="Codes TVA organisation">
+                              {orgVatCodes.map((v) => (
+                                <option key={`org-vat-${v.code}`} value={v.code}>{v.code} - {v.label}{v.rate!=null?` (${v.rate}%)`:''}</option>
+                              ))}
+                            </optgroup>
+                          ) : (
+                            <>
+                              <optgroup label="TVA Taux normal (20%)">
+                                <option value="002">002 - TVA déductible B&S</option>
+                                <option value="B5">B5 - TVA déductible Prestations</option>
+                                <option value="I5">I5 - TVA Immobilisations</option>
+                              </optgroup>
+                              <optgroup label="TVA Taux intermédiaire (10%)">
+                                <option value="A6">A6 - TVA déductible B&S</option>
+                                <option value="B6">B6 - TVA déductible Prestations</option>
+                              </optgroup>
+                              <optgroup label="TVA Taux réduit (5.5%)">
+                                <option value="A2">A2 - TVA déductible B&S</option>
+                                <option value="B2">B2 - TVA déductible Prestations</option>
+                              </optgroup>
+                            </>
+                          )}
                         </select>
                       </div>
 

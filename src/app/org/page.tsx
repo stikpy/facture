@@ -15,6 +15,11 @@ export default function OrgAdminPage() {
   const [newAccountCode, setNewAccountCode] = useState('')
   const [newAccountLabel, setNewAccountLabel] = useState('')
   const [newAccountSynonyms, setNewAccountSynonyms] = useState('')
+  const [vatCodes, setVatCodes] = useState<Array<{id:string, code:string, label:string, rate:number, synonyms?:string[] }>>([])
+  const [newVatCode, setNewVatCode] = useState('')
+  const [newVatLabel, setNewVatLabel] = useState('')
+  const [newVatRate, setNewVatRate] = useState('20')
+  const [newVatSynonyms, setNewVatSynonyms] = useState('')
 
   const load = async () => {
     setLoading(true)
@@ -26,6 +31,7 @@ export default function OrgAdminPage() {
     }
     await loadInboundAddresses()
     await loadAccounts()
+    await loadVatCodes()
     await loadMembers()
     setLoading(false)
   }
@@ -73,6 +79,30 @@ export default function OrgAdminPage() {
   const removeAccount = async (code: string) => {
     const res = await fetch(`/api/orgs/accounts?code=${encodeURIComponent(code)}`, { method: 'DELETE' })
     if (res.ok) await loadAccounts()
+  }
+
+  const loadVatCodes = async () => {
+    const res = await fetch('/api/orgs/vat')
+    const data = await res.json()
+    if (res.ok) setVatCodes(data.vatCodes || [])
+  }
+
+  const addVatCode = async () => {
+    const code = newVatCode.trim()
+    const label = newVatLabel.trim()
+    const rate = Number(newVatRate.replace('%','').replace(',','.'))
+    if (!code || !label || Number.isNaN(rate)) return
+    const synonyms = newVatSynonyms.split(',').map(s=>s.trim()).filter(Boolean)
+    const res = await fetch('/api/orgs/vat', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ code, label, rate, synonyms }) })
+    if (res.ok) {
+      setNewVatCode(''); setNewVatLabel(''); setNewVatRate('20'); setNewVatSynonyms('')
+      await loadVatCodes()
+    }
+  }
+
+  const removeVatCode = async (code: string) => {
+    const res = await fetch(`/api/orgs/vat?code=${encodeURIComponent(code)}`, { method: 'DELETE' })
+    if (res.ok) await loadVatCodes()
   }
 
   const removeInbound = async (addr: string) => {
@@ -184,6 +214,38 @@ export default function OrgAdminPage() {
                     )}
                   </div>
                   <button className="text-sm px-2 py-1 rounded border" onClick={()=>removeAccount(a.code)}>Supprimer</button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      </section>
+
+      <section className="bg-white rounded border p-4">
+        <h2 className="font-medium mb-3">Codes TVA (organisation)</h2>
+        <div className="flex flex-col sm:flex-row gap-2">
+          <input value={newVatCode} onChange={(e)=>setNewVatCode(e.target.value)} placeholder="Code (ex: 002)" className="border rounded px-2 py-1 w-28" />
+          <input value={newVatLabel} onChange={(e)=>setNewVatLabel(e.target.value)} placeholder="Libellé" className="border rounded px-2 py-1 flex-1" />
+          <input value={newVatRate} onChange={(e)=>setNewVatRate(e.target.value)} placeholder="Taux (%)" className="border rounded px-2 py-1 w-24" />
+          <input value={newVatSynonyms} onChange={(e)=>setNewVatSynonyms(e.target.value)} placeholder="Synonymes (séparés par ,)" className="border rounded px-2 py-1 flex-1" />
+          <button onClick={addVatCode} className="px-3 py-1 rounded bg-blue-600 text-white text-sm">Ajouter</button>
+        </div>
+        <div className="mt-4">
+          {vatCodes.length === 0 ? (
+            <div className="text-sm text-gray-500">Aucun code TVA configuré.</div>
+          ) : (
+            <ul className="divide-y">
+              {vatCodes.map((v)=> (
+                <li key={v.id} className="flex items-center justify-between py-2">
+                  <div>
+                    <span className="font-mono text-sm mr-2">{v.code}</span>
+                    <span className="text-sm">{v.label}</span>
+                    <span className="text-xs text-gray-500 ml-2">({v.rate}%)</span>
+                    {v.synonyms && v.synonyms.length>0 && (
+                      <span className="text-xs text-gray-400 ml-2">{v.synonyms.join(', ')}</span>
+                    )}
+                  </div>
+                  <button className="text-sm px-2 py-1 rounded border" onClick={()=>removeVatCode(v.code)}>Supprimer</button>
                 </li>
               ))}
             </ul>
