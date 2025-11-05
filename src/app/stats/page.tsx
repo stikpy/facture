@@ -3,6 +3,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { createClient } from '@/utils/supabase/client'
+import { HOTEL_RESTAURANT_ACCOUNTS } from '@/lib/accounting-presets'
 import { formatTitleCaseName } from '@/lib/utils'
 import {
   ResponsiveContainer,
@@ -31,6 +32,7 @@ export default function StatsPage() {
   const [byAccount, setByAccount] = useState<ByAccount[]>([])
   const [byVat, setByVat] = useState<ByVat[]>([])
   const [coverage, setCoverage] = useState<Coverage | null>(null)
+  const [orgAccounts, setOrgAccounts] = useState<Array<{ code: string; label: string }>>([])
   const [debugJson, setDebugJson] = useState<any>(null)
 
   // Filtres
@@ -80,6 +82,30 @@ export default function StatsPage() {
     }
     setLoading(false)
   }, [group, from, to, supplier, status, min, max, alloc])
+
+  // Charger comptes d'organisation pour labels
+  useEffect(() => {
+    const run = async () => {
+      try {
+        const res = await fetch('/api/orgs/accounts')
+        if (res.ok) {
+          const j = await res.json()
+          setOrgAccounts((j.accounts || []).map((a: any) => ({ code: a.code, label: a.label })))
+        }
+      } catch {}
+    }
+    run()
+  }, [])
+
+  const resolveAccountLabel = useCallback((code?: string) => {
+    const c = String(code || '')
+    if (!c) return '—'
+    const org = orgAccounts.find(a => a.code === c)
+    if (org) return `${org.code} - ${org.label}`
+    const preset = HOTEL_RESTAURANT_ACCOUNTS.find(a => a.code === c)
+    if (preset) return `${preset.code} - ${preset.label}`
+    return c
+  }, [orgAccounts])
 
   useEffect(() => {
     fetchData()
@@ -221,11 +247,11 @@ export default function StatsPage() {
               </div>
               <div className='h-64 w-full border rounded-md bg-white p-2'>
                 <ResponsiveContainer width="100%" height="100%">
-                  <BarChart data={byAccount.slice(0, 12)} layout='vertical' margin={{ top: 10, right: 20, left: 40, bottom: 0 }}>
+                  <BarChart data={byAccount.slice(0, 12).map(r => ({ ...r, accountLabel: resolveAccountLabel(r.account) }))} layout='vertical' margin={{ top: 10, right: 20, left: 40, bottom: 0 }}>
                     <CartesianGrid strokeDasharray="3 3" />
                     <XAxis type='number' />
-                    <YAxis type='category' dataKey='account' width={140} />
-                    <Tooltip formatter={(v: any) => typeof v === 'number' ? numberFmt.format(v) : v} />
+                    <YAxis type='category' dataKey='accountLabel' width={200} />
+                    <Tooltip formatter={(v: any) => typeof v === 'number' ? numberFmt.format(v) : v} labelFormatter={(label: any) => String(label)} />
                     <Bar dataKey='total' name='Total ventilé' fill='#059669' />
                   </BarChart>
                 </ResponsiveContainer>
@@ -244,7 +270,7 @@ export default function StatsPage() {
                   <tbody>
                     {byAccount.map((r) => (
                       <tr key={r.account} className='border-t'>
-                        <td className='px-4 py-2'>{r.account}</td>
+                        <td className='px-4 py-2' title={resolveAccountLabel(r.account)}>{r.account}</td>
                         <td className='px-4 py-2 text-right'>{numberFmt.format(r.total)}</td>
                         <td className='px-4 py-2 text-right'>{numberFmt.format(r.ht)}</td>
                         <td className='px-4 py-2 text-right'>{numberFmt.format(r.tva)}</td>
