@@ -47,6 +47,9 @@ export default function StatsPage() {
   const [min, setMin] = useState<string>('')
   const [max, setMax] = useState<string>('')
   const [selectedAccounts, setSelectedAccounts] = useState<string[]>([])
+  const now = new Date()
+  const [yearSel, setYearSel] = useState<string>(String(now.getFullYear()))
+  const [monthSel, setMonthSel] = useState<string>('')
   const [alloc, setAlloc] = useState<'all'|'allocated'|'unallocated'>('all')
 
   // Tri fournisseur
@@ -145,6 +148,18 @@ export default function StatsPage() {
   useEffect(() => {
     fetchData()
   }, [fetchData])
+
+  // Helpers période (style dashboard)
+  const setMonthRange = (year: number, month1to12: number) => {
+    const f = new Date(year, month1to12 - 1, 1)
+    const t = new Date(year, month1to12, 0)
+    const fmt = (d: Date) => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`
+    setFrom(fmt(f)); setTo(fmt(t))
+  }
+  const setYearRange = (year: number) => {
+    const fmt = (d: Date) => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`
+    setFrom(fmt(new Date(year,0,1))); setTo(fmt(new Date(year,11,31)))
+  }
 
   const toCsv = (rows: any[], headers: string[]) => {
     const esc = (v: any) => {
@@ -254,6 +269,19 @@ export default function StatsPage() {
             </select>
           </div>
           <div>
+            <label className='block text-xs text-gray-600 mb-1'>Année</label>
+            <select value={yearSel} onChange={e=>{setYearSel(e.target.value); if(monthSel){ setMonthRange(Number(e.target.value), Number(monthSel)) } else { setYearRange(Number(e.target.value)) }}} className='w-full border rounded px-2 py-2 text-sm'>
+              {Array.from({length: 6}).map((_,i)=>{ const y = now.getFullYear()-2+i; return (<option key={y} value={y}>{y}</option>) })}
+            </select>
+          </div>
+          <div>
+            <label className='block text-xs text-gray-600 mb-1'>Mois</label>
+            <select value={monthSel} onChange={e=>{setMonthSel(e.target.value); if(e.target.value){ setMonthRange(Number(yearSel), Number(e.target.value)) } else { setYearRange(Number(yearSel)) }}} className='w-full border rounded px-2 py-2 text-sm'>
+              <option value=''>—</option>
+              {Array.from({length:12}).map((_,i)=>{ const m=i+1; return (<option key={m} value={m}>{String(m).padStart(2,'0')}</option>) })}
+            </select>
+          </div>
+          <div>
             <label className='block text-xs text-gray-600 mb-1'>Du</label>
             <input type='date' value={from} onChange={e => setFrom(e.target.value)} className='w-full border rounded px-2 py-2 text-sm' />
           </div>
@@ -314,7 +342,9 @@ export default function StatsPage() {
         </div>
         <div className='mt-3 flex gap-2'>
           <button onClick={fetchData} className='px-3 py-2 text-sm rounded bg-primary text-white'>Appliquer</button>
-          <button onClick={() => { setFrom(''); setTo(''); setSupplier(''); setStatus(''); setMin(''); setMax(''); setSelectedAccounts([]); }} className='px-3 py-2 text-sm rounded border'>Réinitialiser</button>
+          <button onClick={() => { setFrom(''); setTo(''); setSupplier(''); setStatus(''); setMin(''); setMax(''); setSelectedAccounts([]); setYearSel(String(now.getFullYear())); setMonthSel(''); }} className='px-3 py-2 text-sm rounded border'>Réinitialiser</button>
+          <button onClick={()=>{ setYearSel(String(now.getFullYear())); setMonthSel(String(now.getMonth()+1)); setMonthRange(now.getFullYear(), now.getMonth()+1); }} className='px-3 py-2 text-sm rounded border'>Mois courant</button>
+          <button onClick={()=>{ setYearSel(String(now.getFullYear())); setMonthSel(''); setYearRange(now.getFullYear()); }} className='px-3 py-2 text-sm rounded border'>Année</button>
         </div>
       </section>
 
