@@ -422,6 +422,7 @@ export function InvoiceList({ from, to }: { from?: string; to?: string }) {
     const start = (page - 1) * pageSize
     return sortedInvoices.slice(start, start + pageSize)
   }, [sortedInvoices, page, pageSize])
+  const [openCardId, setOpenCardId] = useState<string | null>(null)
 
   if (loading) {
     return (
@@ -487,6 +488,43 @@ export function InvoiceList({ from, to }: { from?: string; to?: string }) {
         </div>
       </div>
 
+      {/* Liste mobile en cartes */}
+      <div className="sm:hidden space-y-2">
+        {pagedInvoices.map((inv: any) => {
+          const ed: any = inv.extracted_data || {}
+          const invoiceNumber = ed.invoice_number || inv.document_reference || ed.document_reference || inv.file_name
+          const supplierName = inv?.supplier?.display_name || ed.supplier_name || '—'
+          const total = ed.total_amount
+          const isOpen = openCardId === inv.id
+          return (
+            <div key={inv.id} className="bg-white border rounded-md p-3">
+              <div className="flex items-start justify-between gap-2">
+                <div>
+                  <div className="text-sm font-semibold text-gray-900">{invoiceNumber || 'Sans n°'}</div>
+                  <div className="text-xs text-gray-600">{formatTitleCaseName(String(supplierName))}</div>
+                </div>
+                <div className="text-sm font-semibold">{typeof total==='number' ? formatCurrency(total) : '—'}</div>
+              </div>
+              <div className="mt-2 flex items-center gap-2">
+                <Button variant="outline" size="sm" onClick={()=>setOpenCardId(isOpen?null:inv.id)}>{isOpen?'Masquer':'Plus'}</Button>
+                <Button variant="outline" size="sm" onClick={()=>router.push(`/invoices/${inv.id}`)}>Ouvrir</Button>
+                <Button variant="outline" size="sm" onClick={()=>handleView(inv.file_path)}>Voir</Button>
+                <Button variant="outline" size="sm" onClick={()=>handleDirectDownload(inv.file_path, inv.file_name)}>Télécharger</Button>
+              </div>
+              {isOpen && (
+                <div className="mt-2 text-xs text-gray-700 space-y-1">
+                  <div className="flex justify-between"><span>Document:</span><span>{resolveDocumentTypeMeta(inv.document_type ?? ed.document_type).label}</span></div>
+                  <div className="flex justify-between"><span>Date:</span><span>{formatShortDate(ed.invoice_date)}</span></div>
+                  <div className="flex justify-between"><span>HT:</span><span>{ed.subtotal?formatCurrency(ed.subtotal):'—'}</span></div>
+                  <div className="flex justify-between"><span>TVA:</span><span>{ed.tax_amount?formatCurrency(ed.tax_amount):'—'}</span></div>
+                  <div className="flex justify-between"><span>Créé le:</span><span>{formatShortDate(inv.created_at)}</span></div>
+                </div>
+              )}
+            </div>
+          )
+        })}
+      </div>
+
       {/* Tableau façon Yooz */}
       {filteredInvoices.length === 0 ? (
         <div className="text-center py-12">
@@ -495,7 +533,7 @@ export function InvoiceList({ from, to }: { from?: string; to?: string }) {
           <p className="mt-1 text-sm text-gray-500">Commencez par uploader vos premières factures.</p>
         </div>
       ) : (
-        <div className="overflow-auto border rounded-md bg-white">
+        <div className="overflow-auto border rounded-md bg-white hidden sm:block">
           <table className="min-w-full text-xs">
             <thead className="bg-gray-50 sticky top-0 z-10">
               <tr>
