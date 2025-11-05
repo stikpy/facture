@@ -227,9 +227,9 @@ export async function GET(request: NextRequest) {
       .sort((a, b) => a[0].localeCompare(b[0]))
       .map(([period, v]) => ({ period, ...v }))
 
-    // Par année
+    // Par année (même périmètre que filteredByAlloc)
     const byYearMap = new Map<string, Totals>()
-    for (const r of rows as any[]) {
+    for (const r of filteredByAlloc as any[]) {
       const ed = (r as any).extracted_data || {}
       const basisDateStr = String(ed.invoice_date || (r as any).created_at)
       const key = yOnly(basisDateStr)

@@ -221,6 +221,23 @@ export default function StatsPage() {
     else { setSupplierSortKey(key); setSupplierSortDir('desc') }
   }
 
+  // Données cumulées pour mini-dashboard
+  const cumulativeByGroup = useMemo(() => {
+    let acc = 0
+    return byGroup.map((g) => {
+      acc += g.total
+      return { period: g.period, cumulative: acc }
+    })
+  }, [byGroup])
+
+  const variationPct = useMemo(() => {
+    if (byGroup.length < 2) return null
+    const last = byGroup[byGroup.length - 1]?.total || 0
+    const prev = byGroup[byGroup.length - 2]?.total || 0
+    if (prev === 0) return null
+    return ((last - prev) / prev) * 100
+  }, [byGroup])
+
   return (
     <div className='max-w-7xl mx-auto px-4 py-8 space-y-8'>
       <div className='flex items-center justify-between'>
@@ -343,6 +360,30 @@ export default function StatsPage() {
               <span className='font-medium'>Attention:</span> {numberFmt.format(coverage.unassignedAllocations.total)} sans compte comptable (allocations non affectées). Pense à compléter les comptes concernés.
             </div>
           )}
+
+      {/* Mini-dashboard: courbe cumulée et variation vs période précédente */}
+      {cumulativeByGroup.length > 0 && (
+        <section className='grid grid-cols-1 lg:grid-cols-3 gap-3'>
+          <div className='lg:col-span-2 border rounded-md bg-white p-2 h-48'>
+            <ResponsiveContainer width="100%" height="100%">
+              <LineChart data={cumulativeByGroup} margin={{ top: 8, right: 10, left: 0, bottom: 0 }}>
+                <CartesianGrid strokeDasharray="3 3" />
+                <XAxis dataKey="period" hide />
+                <YAxis hide />
+                <Tooltip formatter={(v: any) => typeof v === 'number' ? numberFmt.format(v) : v} />
+                <Legend />
+                <Line type="monotone" dataKey="cumulative" name="Cumul TTC" stroke="#1d4ed8" strokeWidth={2} dot={false} />
+              </LineChart>
+            </ResponsiveContainer>
+          </div>
+          <div className='border rounded-md bg-white p-4 flex flex-col justify-center'>
+            <div className='text-xs text-gray-500'>Variation vs période précédente</div>
+            <div className={`text-2xl font-semibold ${variationPct!=null && variationPct>=0 ? 'text-emerald-600' : 'text-rose-600'}`}>
+              {variationPct==null ? '—' : `${variationPct>0?'+':''}${variationPct.toFixed(1)}%`}
+            </div>
+          </div>
+        </section>
+      )}
 
           {byAccount.length > 0 && (
             <section className='space-y-4'>
