@@ -14,6 +14,9 @@ export function AuthPage() {
   const [fullName, setFullName] = useState('')
   const [orgName, setOrgName] = useState('')
   const [magicLinkSent, setMagicLinkSent] = useState(false)
+  const [showOrgModal, setShowOrgModal] = useState(false)
+  const [inviteCode, setInviteCode] = useState('')
+  const [orgAction, setOrgAction] = useState<'create'|'join'>('create')
 
   const handleAuth = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -100,9 +103,15 @@ export function AuthPage() {
             if (orgsRes.ok) {
               const j = await orgsRes.json()
               const hasOrg = Array.isArray(j.organizations) && j.organizations.length > 0
-              if (!hasOrg && pending) {
-                await fetch('/api/orgs', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: pending }) })
-                localStorage.removeItem('pending_org_name')
+              if (!hasOrg) {
+                if (pending) {
+                  await fetch('/api/orgs', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: pending }) })
+                  localStorage.removeItem('pending_org_name')
+                } else {
+                  setShowOrgModal(true)
+                  setIsLoading(false)
+                  return
+                }
               }
             }
           } catch {}
@@ -156,6 +165,34 @@ export function AuthPage() {
               ← Retour à la connexion
             </button>
           </div>
+        </div>
+      </div>
+    )
+  }
+
+  if (showOrgModal) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gray-50 p-4">
+        <div className="max-w-md w-full space-y-6 bg-white border rounded-lg p-6 shadow-sm">
+          <h2 className="text-lg font-semibold">Bienvenue !</h2>
+          <p className="text-sm text-gray-600">Aucune organisation active. Créez-en une ou rejoignez avec un code d'invitation.</p>
+          <div className="flex gap-2 text-sm">
+            <button className={`px-3 py-1 rounded border ${orgAction==='create'?'bg-primary text-white':'bg-white'}`} onClick={()=>setOrgAction('create')}>Créer une organisation</button>
+            <button className={`px-3 py-1 rounded border ${orgAction==='join'?'bg-primary text-white':'bg-white'}`} onClick={()=>setOrgAction('join')}>Rejoindre avec un code</button>
+          </div>
+          {orgAction==='create' ? (
+            <div className="space-y-3">
+              <label className="block text-sm font-medium text-gray-700">Nom de l'organisation</label>
+              <input className="w-full border rounded px-3 py-2" value={orgName} onChange={e=>setOrgName(e.target.value)} />
+              <Button onClick={async()=>{ if(!orgName.trim()) return; setIsLoading(true); await fetch('/api/orgs',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:orgName})}); window.location.href='/' }} disabled={isLoading} className="w-full">Créer</Button>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              <label className="block text-sm font-medium text-gray-700">Code d'invitation</label>
+              <input className="w-full border rounded px-3 py-2 uppercase" value={inviteCode} onChange={e=>setInviteCode(e.target.value.toUpperCase())} />
+              <Button onClick={async()=>{ if(!inviteCode.trim()) return; setIsLoading(true); const res = await fetch('/api/orgs/invites/accept',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({code:inviteCode})}); if(res.ok){ window.location.href='/' } else { const j=await res.json().catch(()=>({})); alert(j.error||'Code invalide'); setIsLoading(false) }}} disabled={isLoading} className="w-full">Rejoindre</Button>
+            </div>
+          )}
         </div>
       </div>
     )
