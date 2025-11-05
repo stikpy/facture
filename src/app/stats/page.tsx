@@ -282,6 +282,7 @@ export default function StatsPage() {
                     <XAxis type='number' />
                     <YAxis type='category' dataKey='accountLabel' width={200} />
                     <Tooltip formatter={(v: any) => typeof v === 'number' ? numberFmt.format(v) : v} labelFormatter={(label: any) => String(label)} />
+                    <Legend />
                     <Bar dataKey='total' name='Total ventilé' fill='#059669' />
                   </BarChart>
                 </ResponsiveContainer>
@@ -326,6 +327,7 @@ export default function StatsPage() {
                     <XAxis type='number' />
                     <YAxis type='category' dataKey='vatLabel' width={260} />
                     <Tooltip formatter={(v: any) => typeof v === 'number' ? numberFmt.format(v) : v} labelFormatter={(label: any) => String(label)} />
+                    <Legend />
                     <Bar dataKey='total' name='Total ventilé' fill='#f59e0b' />
                   </BarChart>
                 </ResponsiveContainer>
