@@ -528,7 +528,13 @@ export default function InvoiceEditPage() {
     setIsDirty(currentSig !== initialSignature)
   }, [supplierId, supplierName, description, clientName, invoiceNumber, docDate, dueDate, subtotal, taxAmount, totalAmount, allocations, initialSignature])
 
-  const addRow = () => setAllocations((prev) => [...prev, { account_code: '', label: '', amount: 0, amount_input: '' }])
+  const addRow = () => setAllocations((prev) => {
+    const baseHt = (parseDecimalInput(subtotal) ?? Number(invoice?.extracted_data?.subtotal || 0))
+    const usedHt = prev.reduce((sum, r) => sum + Number(r.amount || 0), 0)
+    const remaining = round2(Math.max(Number(baseHt || 0) - usedHt, 0))
+    const amount_input = remaining > 0 ? String(remaining) : ''
+    return [...prev, { account_code: '', label: '', amount: remaining, amount_input }]
+  })
   const removeRow = (idx: number) => setAllocations((prev) => prev.filter((_, i) => i !== idx))
   const updateRow = (idx: number, patch: Partial<AllocationFormRow>) =>
     setAllocations((prev) => prev.map((r, i) => (i === idx ? { ...r, ...patch } : r)))
