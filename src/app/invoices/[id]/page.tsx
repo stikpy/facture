@@ -117,6 +117,7 @@ export default function InvoiceEditPage() {
   const [pdfRotation, setPdfRotation] = useState(0)
   const [previewWidth, setPreviewWidth] = useState(33.33) // % de la largeur
   const [isResizing, setIsResizing] = useState(false)
+  const [showMobilePreview, setShowMobilePreview] = useState(false)
   const [isEditingProps, setIsEditingProps] = useState(false)
   const [finalizing, setFinalizing] = useState(false)
   const [clientName, setClientName] = useState('')
@@ -1727,10 +1728,34 @@ export default function InvoiceEditPage() {
                 </div>
               )}
 
-              <div className="flex justify-end mt-4 pt-4 border-t border-gray-200">
+              <div className="hidden lg:flex justify-end mt-4 pt-4 border-t border-gray-200">
                 <Button onClick={save} disabled={saving || !isDirty} size="lg">
                   {saving ? 'Enregistrement en cours…' : 'Enregistrer la facture'}
                 </Button>
+              </div>
+              {/* Barre d'action mobile */}
+              <div className="lg:hidden fixed bottom-0 inset-x-0 bg-white/95 backdrop-blur border-t z-30">
+                <div className="max-w-4xl mx-auto px-3 py-2 flex items-center justify-between gap-2">
+                  <div className="text-xs text-gray-600">
+                    <div className="flex items-center gap-2">
+                      <span className="font-medium">Total ventilé:</span>
+                      <span>{allocations.reduce((s,r)=> s + totalForRow(r), 0).toFixed(2)} €</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-gray-500">Facture:</span>
+                      <span className="font-medium">{invoiceTotal.toFixed(2)} €</span>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    {pdfUrl && (
+                      <Button variant="outline" size="sm" onClick={()=>setShowMobilePreview(true)}>Aperçu</Button>
+                    )}
+                    {pdfUrl && (
+                      <a href={pdfUrl} target="_blank" rel="noreferrer" className="text-xs px-2 py-1 border rounded hover:bg-gray-50">Télécharger</a>
+                    )}
+                    <Button onClick={save} disabled={saving || !isDirty} size="sm">{saving ? '...':'Enregistrer'}</Button>
+                  </div>
+                </div>
               </div>
             </div>
           </div>
@@ -1840,6 +1865,25 @@ export default function InvoiceEditPage() {
           )}
         </div>
       </div>
+      {/* Aperçu mobile plein écran */}
+      {showMobilePreview && (
+        <div className="fixed inset-0 z-40 bg-black/70 flex flex-col lg:hidden">
+          <div className="p-3 flex items-center justify-between bg-white">
+            <div className="text-sm font-semibold">Aperçu PDF</div>
+            <div className="flex items-center gap-2">
+              {pdfUrl && <a href={pdfUrl} target="_blank" rel="noreferrer" className="text-xs px-2 py-1 border rounded hover:bg-gray-50">Télécharger</a>}
+              <Button size="sm" variant="outline" onClick={()=>setShowMobilePreview(false)}>Fermer</Button>
+            </div>
+          </div>
+          <div className="flex-1 bg-white">
+            {pdfUrl ? (
+              <iframe src={`${pdfUrl}#view=FitH`} className="w-full h-full" />
+            ) : (
+              <div className="h-full flex items-center justify-center text-white">Aucun aperçu</div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   )
 }
