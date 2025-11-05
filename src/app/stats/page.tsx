@@ -173,6 +173,35 @@ export default function StatsPage() {
     URL.revokeObjectURL(url)
   }
 
+  // Helpers d'export pro (2 décimales, colonnes détaillées)
+  const numberCsv = (n: any) => {
+    const v = Number(n || 0)
+    return Number.isFinite(v) ? v.toFixed(2) : ''
+  }
+
+  const getAccountParts = (code?: string) => {
+    const c = String(code || '')
+    const org = orgAccounts.find(a => a.code === c)
+    if (org) return { code: org.code, label: org.label }
+    const preset = HOTEL_RESTAURANT_ACCOUNTS.find(a => a.code === c)
+    if (preset) return { code: preset.code, label: preset.label }
+    return { code: c, label: '' }
+  }
+
+  const getVatParts = (vkey?: string) => {
+    const k = String(vkey || '')
+    if (!k) return { code: '', label: '', rate: '' }
+    if (k.includes('%')) {
+      const r = k.replace('%','')
+      return { code: '', label: '', rate: r }
+    }
+    const org = orgVatCodes.find(v => v.code.toLowerCase() === k.toLowerCase())
+    if (org) return { code: org.code, label: org.label, rate: String(org.rate ?? '') }
+    const preset = VAT_PRESETS.find(v => v.code.toLowerCase() === k.toLowerCase())
+    if (preset) return { code: preset.code, label: preset.label, rate: String(preset.rate) }
+    return { code: k, label: '', rate: '' }
+  }
+
   const sortedSuppliers = useMemo(() => {
     const data = [...bySupplier]
     data.sort((a, b) => {
@@ -282,7 +311,25 @@ export default function StatsPage() {
             <section className='space-y-4'>
               <div className='flex items-center justify-between'>
                 <h2 className='text-lg font-medium'>Par compte comptable (ventilations)</h2>
-                <button className='text-sm text-primary hover:underline' onClick={() => downloadCsv('par_compte', byAccount, ['account','total','ht','tva','count'])}>Export CSV</button>
+                <button
+                  className='text-sm text-primary hover:underline'
+                  onClick={() => {
+                    const rows = byAccount.map(r => {
+                      const parts = getAccountParts((r as any).account)
+                      return {
+                        account_code: parts.code,
+                        account_label: parts.label,
+                        ht: numberCsv((r as any).ht),
+                        tva: numberCsv((r as any).tva),
+                        total: numberCsv((r as any).total),
+                        lines: (r as any).count
+                      }
+                    })
+                    downloadCsv('ventilations_par_compte', rows, ['account_code','account_label','ht','tva','total','lines'])
+                  }}
+                >
+                  Export CSV
+                </button>
               </div>
               <div className='h-64 w-full border rounded-md bg-white p-2'>
                 <ResponsiveContainer width="100%" height="100%">
@@ -327,7 +374,26 @@ export default function StatsPage() {
             <section className='space-y-4'>
               <div className='flex items-center justify-between'>
                 <h2 className='text-lg font-medium'>Par code / taux TVA (ventilations)</h2>
-                <button className='text-sm text-primary hover:underline' onClick={() => downloadCsv('par_tva', byVat, ['vat','total','ht','tva','count'])}>Export CSV</button>
+                <button
+                  className='text-sm text-primary hover:underline'
+                  onClick={() => {
+                    const rows = byVat.map(r => {
+                      const parts = getVatParts((r as any).vat)
+                      return {
+                        vat_code: parts.code,
+                        vat_label: parts.label,
+                        vat_rate: parts.rate,
+                        ht: numberCsv((r as any).ht),
+                        tva: numberCsv((r as any).tva),
+                        total: numberCsv((r as any).total),
+                        lines: (r as any).count
+                      }
+                    })
+                    downloadCsv('ventilations_par_tva', rows, ['vat_code','vat_label','vat_rate','ht','tva','total','lines'])
+                  }}
+                >
+                  Export CSV
+                </button>
               </div>
               <div className='h-64 w-full border rounded-md bg-white p-2'>
                 <ResponsiveContainer width="100%" height="100%">
@@ -380,7 +446,28 @@ export default function StatsPage() {
             <section className='space-y-4'>
               <div className='flex items-center justify-between'>
                 <h2 className='text-lg font-medium'>Dépenses par centre (ventilations)</h2>
-                <button className='text-sm text-primary hover:underline' onClick={() => downloadCsv('depenses_par_centre', byCenter, ['center','total','ht','tva','count'])}>Export CSV</button>
+                <button
+                  className='text-sm text-primary hover:underline'
+                  onClick={() => {
+                    const rows = byCenter.map(r => {
+                      const txt = String((r as any).center || '')
+                      const idx = txt.indexOf(' - ')
+                      const code = idx > -1 ? txt.slice(0, idx) : txt
+                      const label = idx > -1 ? txt.slice(idx + 3) : ''
+                      return {
+                        account_code: code,
+                        account_label: label,
+                        ht: numberCsv((r as any).ht),
+                        tva: numberCsv((r as any).tva),
+                        total: numberCsv((r as any).total),
+                        lines: (r as any).count
+                      }
+                    })
+                    downloadCsv('depenses_par_centre', rows, ['account_code','account_label','ht','tva','total','lines'])
+                  }}
+                >
+                  Export CSV
+                </button>
               </div>
               <div className='h-64 w-full border rounded-md bg-white p-2'>
                 <ResponsiveContainer width="100%" height="100%">
@@ -426,7 +513,16 @@ export default function StatsPage() {
               <h2 className='text-lg font-medium'>Par période ({group === 'month' ? 'mois' : 'jour'})</h2>
               <button
                 className='text-sm text-primary hover:underline'
-                onClick={() => downloadCsv('stats_par_periode', byGroup, ['period', 'total', 'ht', 'tva', 'count'])}
+                onClick={() => {
+                  const rows = byGroup.map(r => ({
+                    period: (r as any).period,
+                    ht: numberCsv((r as any).ht),
+                    tva: numberCsv((r as any).tva),
+                    total: numberCsv((r as any).total),
+                    lines: (r as any).count
+                  }))
+                  downloadCsv('stats_par_periode', rows, ['period','ht','tva','total','lines'])
+                }}
               >
                 Export CSV
               </button>
@@ -477,7 +573,16 @@ export default function StatsPage() {
               <h2 className='text-lg font-medium'>Par année</h2>
               <button
                 className='text-sm text-primary hover:underline'
-                onClick={() => downloadCsv('stats_par_annee', byYear, ['year', 'total', 'ht', 'tva', 'count'])}
+                onClick={() => {
+                  const rows = byYear.map(r => ({
+                    year: (r as any).year,
+                    ht: numberCsv((r as any).ht),
+                    tva: numberCsv((r as any).tva),
+                    total: numberCsv((r as any).total),
+                    lines: (r as any).count
+                  }))
+                  downloadCsv('stats_par_annee', rows, ['year','ht','tva','total','lines'])
+                }}
               >
                 Export CSV
               </button>
@@ -528,7 +633,18 @@ export default function StatsPage() {
               <h2 className='text-lg font-medium'>Dépenses par fournisseur</h2>
               <button
                 className='text-sm text-primary hover:underline'
-                onClick={() => downloadCsv('depenses_par_fournisseur', sortedSuppliers, ['supplier', 'total', 'ht', 'tva', 'count'])}
+                onClick={() => {
+                  const rows = sortedSuppliers.map(r => ({
+                    supplier: (r as any).supplier,
+                    supplier_code: (r as any).supplierCode || '',
+                    supplier_id: (r as any).supplierId || '',
+                    ht: numberCsv((r as any).ht),
+                    tva: numberCsv((r as any).tva),
+                    total: numberCsv((r as any).total),
+                    lines: (r as any).count
+                  }))
+                  downloadCsv('depenses_par_fournisseur', rows, ['supplier','supplier_code','supplier_id','ht','tva','total','lines'])
+                }}
               >
                 Export CSV
               </button>
