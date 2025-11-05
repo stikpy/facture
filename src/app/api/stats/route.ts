@@ -300,10 +300,17 @@ export async function GET(request: NextRequest) {
       const t = Number(tva || 0)
       if (h <= 0 || t <= 0) return null
       const r = (t / h) * 100
-      if (Math.abs(r - 5.5) < 1.5) return 5.5
-      if (Math.abs(r - 10) < 2) return 10
-      if (Math.abs(r - 20) < 3) return 20
-      return Math.round(r)
+      // Snap au taux le plus proche parmi [0, 5.5, 10, 20] si proche (< 3 pts)
+      const candidates = [0, 5.5, 10, 20]
+      let best: number | null = null
+      let bestDelta = Infinity
+      for (const c of candidates) {
+        const d = Math.abs(r - c)
+        if (d < bestDelta) { bestDelta = d; best = c }
+      }
+      if (best !== null && bestDelta <= 3) return best
+      // Trop éloigné → inconnu: retourner null pour éviter des catégories “13%” fantômes
+      return null
     }
     const supplierToBase = (name: string): string => {
       const n = (name || '').toLowerCase()
@@ -320,7 +327,7 @@ export async function GET(request: NextRequest) {
       const base = supplierToBase(String(ed.supplier_name || ''))
       const alloc = allocatedMap.get(String((r as any).id))
       const rate = alloc ? approxVat(Number(alloc.ht), Number(alloc.tva)) : approxVat(Number(ed.subtotal), Number(ed.tax_amount))
-      const key = rate ? `${base} ${rate}%` : base
+      const key = rate != null ? `${base} ${rate}%` : base
       const cur = byCategoryMap.get(key) || { total: 0, ht: 0, tva: 0, count: 0 }
       if (alloc) {
         cur.total += alloc.total
