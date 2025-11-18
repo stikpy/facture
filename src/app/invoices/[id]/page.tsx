@@ -565,7 +565,7 @@ export default function InvoiceEditPage() {
     }
   }, [invoice?.id, invoice?.status])
 
-  // Charger des factures candidates si doublon détecté (sans dépendances non initialisées)
+  // Charger des factures candidates (doublon potentiel) — on ne dépend plus d'un flag explicite
   useEffect(() => {
     const loadDuplicates = async () => {
       try {
@@ -616,13 +616,9 @@ export default function InvoiceEditPage() {
         setDuplicateCandidates([])
       }
     }
-    const dup = (invoice?.status === 'duplicate')
-      || String(queueMeta?.errorMessage || '').includes('duplicate_invoice_number')
-      || String((invoice as any)?.extracted_data?.error || '').toLowerCase().includes('duplicate')
-    if (dup) {
-      loadDuplicates()
-    }
-  }, [invoice?.status, queueMeta?.errorMessage, invoice?.id, invoice?.organization_id, (invoice as any)?.extracted_data?.invoice_number])
+    // Toujours tenter un chargement lorsqu'on a les clés minimales
+    loadDuplicates()
+  }, [invoice?.id, invoice?.organization_id, (invoice as any)?.extracted_data?.invoice_number, (invoice as any)?.document_reference, (invoice as any)?.extracted_data?.document_reference])
 
   // Navigation clavier ← →
   useEffect(() => {
@@ -1108,7 +1104,10 @@ export default function InvoiceEditPage() {
                           <div className="min-w-0">
                             <div className="text-gray-900 truncate">{d.file_name || 'Facture'}</div>
                             <div className="text-[11px] text-gray-500">
-                              N°: {String(d?.extracted_data?.invoice_number || '')} • {formatShortDate(d.created_at)} • Statut: {d.status}
+                              {(() => {
+                                const bestNum = String(d?.extracted_data?.invoice_number || d?.document_reference || d?.extracted_data?.document_reference || '—')
+                                return <>N°: {bestNum} • {formatShortDate(d.created_at)} • Statut: {d.status}</>
+                              })()}
                             </div>
                           </div>
                           <div className="flex items-center gap-2 shrink-0">
