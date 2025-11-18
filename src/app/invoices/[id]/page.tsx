@@ -729,7 +729,7 @@ export default function InvoiceEditPage() {
       const totalVentileHT = round2(allocations.reduce((sum, row) => sum + Number(row.amount || 0), 0))
       const totalVentileTTC = round2(allocations.reduce((sum, row) => sum + totalForRow(row), 0))
       
-      // Calculer le total HT et TTC réel à partir des articles extraits (plus fiable que extracted_data.total_amount)
+      // Calculer le total HT et TTC réel à partir des articles extraits (fallback si totaux extraits absents)
       let calculatedInvoiceTotalHT = 0
       let calculatedInvoiceTotalTTC = 0
       if (invoice?.extracted_data?.items && Array.isArray(invoice.extracted_data.items)) {
@@ -741,11 +741,13 @@ export default function InvoiceEditPage() {
       }
       const extractedTotal = Number(invoice?.extracted_data?.total_amount || 0)
       const extractedTax = Number(invoice?.extracted_data?.tax_amount || 0)
-      const extractedTotalHT = extractedTotal - extractedTax
-      const expectedHT = round2(calculatedInvoiceTotalHT > 0 ? calculatedInvoiceTotalHT : extractedTotalHT)
-      const expectedTTC = round2(calculatedInvoiceTotalTTC > 0 ? calculatedInvoiceTotalTTC : extractedTotal)
+      const extractedSubtotal = Number(invoice?.extracted_data?.subtotal || 0)
+      const extractedTotalHT = extractedSubtotal > 0 ? extractedSubtotal : (extractedTotal - extractedTax)
+      // Règle: privilégier les données extraites de la facture; ne tomber sur le calcul par lignes qu'en absence de totaux extraits
+      const expectedHT = round2(extractedTotalHT > 0 ? extractedTotalHT : calculatedInvoiceTotalHT)
+      const expectedTTC = round2(extractedTotal > 0 ? extractedTotal : calculatedInvoiceTotalTTC)
       
-      // Valider que le total HT des ventilations correspond au total HT attendu
+      // Valider que le total HT des ventilations correspond au total HT attendu (données extraites en priorité)
       if (Math.abs(totalVentileHT - expectedHT) > 0.01) {
         setError(`La somme des ventilations HT (${totalVentileHT.toFixed(2)} €) doit être égale au total HT calculé (${expectedHT.toFixed(2)} €).`)
         setSaving(false)
@@ -2143,9 +2145,11 @@ export default function InvoiceEditPage() {
                     }
                     const extractedTotal = Number(invoice?.extracted_data?.total_amount || 0)
                     const extractedTax = Number(invoice?.extracted_data?.tax_amount || 0)
-                    const extractedTotalHT = extractedTotal - extractedTax
-                    const expectedTotalHT = calculatedTotalHT > 0 ? calculatedTotalHT : extractedTotalHT
-                    const expectedTotalTTC = calculatedTotalTTC > 0 ? calculatedTotalTTC : extractedTotal
+                    const extractedSubtotal = Number(invoice?.extracted_data?.subtotal || 0)
+                    const extractedTotalHT = extractedSubtotal > 0 ? extractedSubtotal : (extractedTotal - extractedTax)
+                    // Règle UI: afficher et comparer en priorité aux totaux extraits
+                    const expectedTotalHT = extractedTotalHT > 0 ? extractedTotalHT : calculatedTotalHT
+                    const expectedTotalTTC = extractedTotal > 0 ? extractedTotal : calculatedTotalTTC
                     
                     // Vérifier si la différence correspond à la TVA attendue
                     const difference = Math.abs(calculatedTotalHT - extractedTotal)
