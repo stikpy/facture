@@ -1099,7 +1099,7 @@ export default function InvoiceEditPage() {
                   <span className="mr-2">Type: {invoice?.mime_type || '—'}</span>
                   <span>Taille: {formatBytes(invoice?.file_size)}</span>
                 </div>
-                {isDuplicate && duplicateCandidates.length > 0 && (
+                {duplicateCandidates.length > 0 && (
                   <div className="mt-4 bg-white border border-amber-200 rounded p-3 text-xs">
                     <div className="font-semibold text-amber-800 mb-2">Facture(s) existante(s) avec le même numéro</div>
                     <div className="space-y-2">
