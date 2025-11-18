@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useRef, useState, type ChangeEvent } from 'react'
+import { useEffect, useRef, useState, useMemo, useCallback, type ChangeEvent } from 'react'
 import { useParams, useRouter, useSearchParams } from 'next/navigation'
 import Link from 'next/link'
 import { createClient } from '@/utils/supabase/client'
@@ -73,6 +73,7 @@ interface AllocationFormRow {
   amount_input: string
   vat_code?: string
   vat_rate?: number
+  item_indices?: number[] // Indices des articles extraits utilisés dans cette allocation
 }
 
 export default function InvoiceEditPage() {
@@ -96,6 +97,9 @@ export default function InvoiceEditPage() {
   const [supplierValidationStatus, setSupplierValidationStatus] = useState<string | null>(null)
   const [orgAccounts, setOrgAccounts] = useState<Array<{ code: string; label: string }>>([])
   const [orgVatCodes, setOrgVatCodes] = useState<Array<{ code: string; label: string; rate?: number }>>([])
+  const [showDuplicateModal, setShowDuplicateModal] = useState(false)
+  const [selectedItems, setSelectedItems] = useState<Set<number>>(new Set())
+  const [duplicating, setDuplicating] = useState(false)
 
   // Fonction pour uniformiser le texte (Title Case)
   const formatText = (text: string) => {
@@ -113,11 +117,24 @@ export default function InvoiceEditPage() {
   const [invoice, setInvoice] = useState<any | null>(null)
   const [pdfUrl, setPdfUrl] = useState<string | null>(null)
   const [showPreview, setShowPreview] = useState(true)
+  const [rightPanelTab, setRightPanelTab] = useState<'pdf' | 'invoice'>('pdf') // 'pdf' ou 'invoice'
   const [pdfZoom, setPdfZoom] = useState(100)
   const [pdfRotation, setPdfRotation] = useState(0)
   const [previewWidth, setPreviewWidth] = useState(33.33) // % de la largeur
   const [isResizing, setIsResizing] = useState(false)
   const [showMobilePreview, setShowMobilePreview] = useState(false)
+  const [selectedItemsForAllocation, setSelectedItemsForAllocation] = useState<Set<number>>(new Set())
+  
+  // Calculer quels articles sont déjà ventilés
+  const allocatedItemIndices = useMemo(() => {
+    const allocated = new Set<number>()
+    allocations.forEach((alloc) => {
+      if (Array.isArray(alloc.item_indices)) {
+        alloc.item_indices.forEach((idx: number) => allocated.add(idx))
+      }
+    })
+    return allocated
+  }, [allocations])
   const [isEditingProps, setIsEditingProps] = useState(false)
   const [finalizing, setFinalizing] = useState(false)
   const [clientName, setClientName] = useState('')
@@ -140,13 +157,100 @@ export default function InvoiceEditPage() {
   const [prevId, setPrevId] = useState<string | null>(null)
   const [nextId, setNextId] = useState<string | null>(null)
   const round2 = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100
-  const vatRateFromCode = (code?: string) => {
+  
+  // Helper pour normaliser le taux de TVA selon le fournisseur
+  // Certains fournisseurs utilisent des codes (ex: "1" = 5.5%) au lieu de pourcentages
+  const normalizeTaxRate = (extractedRate: number | undefined, supplierName?: string | null): number | null => {
+    if (!extractedRate) return null
+    
+    const rate = Number(extractedRate)
+    
+    // Mapping spécifique par fournisseur pour les codes TVA
+    // Exemple: code "1" = 5.5% pour certains fournisseurs
+    const supplierVatMappings: Record<string, Record<number, number>> = {
+      // Ajouter ici les mappings spécifiques par nom de fournisseur
+      // Exemple: "NOM_FOURNISSEUR": { 1: 5.5, 2: 10, 3: 20 }
+    }
+    
+    // Mapping par défaut pour les codes TVA courants (si le fournisseur n'a pas de mapping spécifique)
+    // Les codes 1, 2, 3 correspondent souvent aux taux réduit, intermédiaire, normal
+    const defaultVatCodeMapping: Record<number, number> = {
+      1: 5.5,  // Code 1 = Taux réduit 5.5%
+      2: 10,   // Code 2 = Taux intermédiaire 10%
+      3: 20    // Code 3 = Taux normal 20%
+    }
+    
+    // Vérifier si le fournisseur a un mapping spécifique
+    if (supplierName && supplierVatMappings[supplierName] && supplierVatMappings[supplierName][rate]) {
+      return supplierVatMappings[supplierName][rate]
+    }
+    
+    // Si le taux est exactement 1, 2 ou 3 (codes courants), utiliser le mapping par défaut
+    if (rate === 1 || rate === 2 || rate === 3) {
+      return defaultVatCodeMapping[rate] ?? null
+    }
+    
+    // Si le taux est un code numérique faible (entre 0 et 1) et non un pourcentage réel
+    if (rate > 0 && rate < 1) {
+      // C'est probablement un code, pas un pourcentage
+      return null
+    }
+    
+    // Si le taux est entre 0.1% et 2%, c'est suspect (très rare en France)
+    // Les taux courants sont 0%, 2.1%, 5.5%, 10%, 20%
+    if (rate > 0 && rate < 2.1) {
+      return null // Ne pas afficher un taux suspect
+    }
+    
+    // Taux normalisé (déjà en pourcentage)
+    return rate
+  }
+  
+  // Helper pour calculer HT et TTC en fonction de is_ht
+  const calculateItemAmounts = (item: any) => {
+    const totalPrice = Number(item.total_price || 0)
+    const normalizedRate = normalizeTaxRate(item.tax_rate, invoice?.extracted_data?.supplier_name)
+    const taxRate = (normalizedRate ?? Number(item.tax_rate || 0)) / 100
+    const isHT = item.is_ht !== false // Par défaut true si non défini (compatibilité)
+    
+    let itemHT: number
+    let itemTTC: number
+    let itemTVA: number
+    
+    if (isHT) {
+      // total_price est déjà HT
+      itemHT = totalPrice
+      itemTTC = totalPrice * (1 + taxRate)
+      itemTVA = itemTTC - itemHT
+    } else {
+      // total_price est TTC
+      itemTTC = totalPrice
+      itemHT = totalPrice / (1 + taxRate)
+      itemTVA = itemTTC - itemHT
+    }
+    
+    return {
+      ht: round2(itemHT),
+      ttc: round2(itemTTC),
+      tva: round2(itemTVA),
+      normalizedTaxRate: normalizedRate // Retourner le taux normalisé pour l'affichage
+    }
+  }
+  
+  const vatRateFromCode = useCallback((code?: string) => {
     if (!code) return 0
-    const fromOrg = orgVatCodes.find(v => v.code === code)
-    if (fromOrg) return Number(fromOrg.rate || 0)
+    try {
+      const fromOrg = orgVatCodes.find(v => v.code === code)
+      if (fromOrg) return Number(fromOrg.rate || 0)
+      if (findVatByCode && typeof findVatByCode === 'function') {
     const v = findVatByCode(code)
     return v?.rate ?? 0
   }
+    } catch (error) {
+      console.error('Error in vatRateFromCode:', error)
+    }
+    return 0
+  }, [orgVatCodes])
   const taxForRow = (row: AllocationFormRow) => {
     const rate = row.vat_rate != null ? Number(row.vat_rate) : vatRateFromCode(row.vat_code)
     return round2((Number(row.amount || 0) * rate) / 100)
@@ -311,12 +415,13 @@ export default function InvoiceEditPage() {
           const amountInput = formatDecimalForInput(a.amount)
           const amountNumber = parseDecimalInput(amountInput) ?? 0
           return {
-            account_code: a.account_code || '',
-            label: a.label || '',
+          account_code: a.account_code || '',
+          label: a.label || '',
             amount: amountNumber,
             amount_input: amountInput,
-            vat_code: a.vat_code || '',
-            vat_rate: a.vat_rate != null ? Number(a.vat_rate) : undefined,
+          vat_code: a.vat_code || '',
+          vat_rate: a.vat_rate != null ? Number(a.vat_rate) : undefined,
+            item_indices: Array.isArray(a.item_indices) ? a.item_indices : [],
           }
         })
         console.log('🔍 [ALLOCATIONS] Ventilations formatées:', incoming)
@@ -615,14 +720,43 @@ export default function InvoiceEditPage() {
         label: row.label,
         amount: round2(Number(row.amount || 0)),
         vat_code: row.vat_code || '',
-        vat_rate: row.vat_rate != null ? Number(row.vat_rate) : vatRateFromCode(row.vat_code)
+        vat_rate: row.vat_rate != null ? Number(row.vat_rate) : vatRateFromCode(row.vat_code),
+        item_indices: Array.isArray(row.item_indices) ? row.item_indices : []
       }))
       console.log('🔍 [SAVE] Allocations formatées pour sauvegarde:', derived)
 
-      const totalTtc = round2(allocations.reduce((sum, row) => sum + totalForRow(row), 0))
-      const expected = round2(invoiceTotal)
-      if (Math.abs(totalTtc - expected) > 0.01) {
-        setError(`La somme des ventilations (${totalTtc} €) doit être égale au total TTC (${expected} €).`)
+      // Calculer le total HT et TTC des ventilations
+      const totalVentileHT = round2(allocations.reduce((sum, row) => sum + Number(row.amount || 0), 0))
+      const totalVentileTTC = round2(allocations.reduce((sum, row) => sum + totalForRow(row), 0))
+      
+      // Calculer le total HT et TTC réel à partir des articles extraits (plus fiable que extracted_data.total_amount)
+      let calculatedInvoiceTotalHT = 0
+      let calculatedInvoiceTotalTTC = 0
+      if (invoice?.extracted_data?.items && Array.isArray(invoice.extracted_data.items)) {
+        invoice.extracted_data.items.forEach((item: any) => {
+          const amounts = calculateItemAmounts(item)
+          calculatedInvoiceTotalHT += amounts.ht
+          calculatedInvoiceTotalTTC += amounts.ttc
+        })
+      }
+      const extractedTotal = Number(invoice?.extracted_data?.total_amount || 0)
+      const extractedTax = Number(invoice?.extracted_data?.tax_amount || 0)
+      const extractedTotalHT = extractedTotal - extractedTax
+      const expectedHT = round2(calculatedInvoiceTotalHT > 0 ? calculatedInvoiceTotalHT : extractedTotalHT)
+      const expectedTTC = round2(calculatedInvoiceTotalTTC > 0 ? calculatedInvoiceTotalTTC : extractedTotal)
+      
+      // Valider que le total HT des ventilations correspond au total HT attendu
+      if (Math.abs(totalVentileHT - expectedHT) > 0.01) {
+        setError(`La somme des ventilations HT (${totalVentileHT.toFixed(2)} €) doit être égale au total HT calculé (${expectedHT.toFixed(2)} €).`)
+        setSaving(false)
+        return
+      }
+      
+      // Valider que le total TTC des ventilations correspond au total TTC attendu
+      // Cela permet de détecter les erreurs de taux de TVA sélectionnés
+      if (Math.abs(totalVentileTTC - expectedTTC) > 0.01) {
+        const difference = totalVentileTTC - expectedTTC
+        setError(`La somme des ventilations TTC (${totalVentileTTC.toFixed(2)} €) ne correspond pas au total TTC calculé (${expectedTTC.toFixed(2)} €). Différence: ${difference > 0 ? '+' : ''}${difference.toFixed(2)} €. Vérifiez les taux de TVA sélectionnés.`)
         setSaving(false)
         return
       }
@@ -1526,9 +1660,135 @@ export default function InvoiceEditPage() {
                   <Input value={description} onChange={(e: ChangeEvent<HTMLInputElement>) => setDescription(e.target.value)} placeholder="Description de la facture" />
                 </div>
               </div>
+              
+              {/* Section Articles et Duplication */}
+              {invoice?.extracted_data?.items && Array.isArray(invoice.extracted_data.items) && invoice.extracted_data.items.length > 0 && (
+                <div className="mt-4 pt-4 border-t border-gray-200">
+                  <div className="flex items-center justify-between mb-3">
+                    <h3 className="text-xs font-semibold text-gray-700">Articles de la facture ({invoice.extracted_data.items.length})</h3>
+                    <div className="flex items-center gap-2">
+                      <Button 
+                        size="sm" 
+                        variant="outline"
+                        className="text-xs"
+                        disabled={retrying || invoice?.status === 'processing' || invoice?.status === 'queued'}
+                        onClick={async () => {
+                          try {
+                            setRetrying(true)
+                            setError(null)
+                            const { data: { session } } = await supabase.auth.getSession()
+                            const token = session?.access_token || ''
+                            
+                            const addRes = await fetch('/api/queue/add', {
+                              method: 'POST',
+                              headers: {
+                                'Content-Type': 'application/json',
+                                ...(token ? { Authorization: `Bearer ${token}` } : {})
+                              },
+                              body: JSON.stringify({ invoiceId: params.id })
+                            })
+                            
+                            const addData = await addRes.json()
+                            if (!addRes.ok) {
+                              throw new Error(addData.error || 'Impossible de relancer l\'extraction')
+                            }
+                            
+                            setInvoice((prev: any) => prev ? { ...prev, status: 'queued' } : prev)
+                            
+                            const poll = async () => {
+                              try {
+                                const statusRes = await fetch(`/api/queue/status?invoiceId=${params.id}`, {
+                                  headers: token ? { Authorization: `Bearer ${token}` } : undefined
+                                })
+                                const statusData = await statusRes.json()
+                                if (statusData.status === 'completed' || statusData.status === 'failed') {
+                                  const rr = await fetch(`/api/invoices/${params.id}`, {
+                                    headers: token ? { Authorization: `Bearer ${token}` } : undefined
+                                  })
+                                  const dd = await rr.json()
+                                  if (rr.ok) {
+                                    setInvoice(dd.invoice)
+                                    setRetrying(false)
+                                  }
+                                } else if (statusData.status === 'processing') {
+                                  setInvoice((prev: any) => prev ? { ...prev, status: 'processing' } : prev)
+                                  setTimeout(poll, 4000)
+                                } else {
+                                  setTimeout(poll, 4000)
+                                }
+                              } catch {}
+                            }
+                            poll()
+                          } catch (e: any) {
+                            setError(e.message)
+                            setRetrying(false)
+                          }
+                        }}
+                      >
+                        {retrying || invoice?.status === 'processing' || invoice?.status === 'queued' 
+                          ? '⏳ Extraction...' 
+                          : '🔄 Relancer l\'extraction'}
+                      </Button>
+                      <Button 
+                        size="sm" 
+                        variant="outline"
+                        className="text-xs"
+                        onClick={() => {
+                          setSelectedItems(new Set())
+                          setShowDuplicateModal(true)
+                        }}
+                      >
+                        <svg className="w-3 h-3 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7v8a2 2 0 002 2h6M8 7V5a2 2 0 012-2h4.586a1 1 0 01.707.293l4.414 4.414a1 1 0 01.293.707V15a2 2 0 01-2 2h-2M8 7H6a2 2 0 00-2 2v10a2 2 0 002 2h8a2 2 0 002-2v-2" />
+                        </svg>
+                        Dupliquer avec sélection
+                      </Button>
+                    </div>
+                  </div>
+                  <div className="space-y-2 max-h-48 overflow-y-auto">
+                    {invoice.extracted_data.items.map((item: any, idx: number) => {
+                      const isAllocated = allocatedItemIndices.has(idx)
+                      return (
+                        <div 
+                          key={idx} 
+                          className={`text-xs rounded p-2 border ${
+                            isAllocated 
+                              ? 'bg-green-50 border-green-300 opacity-75' 
+                              : 'bg-gray-50 border-gray-200'
+                          }`}
+                        >
+                          <div className="flex items-center justify-between">
+                            <div>
+                              <div className="font-medium text-gray-900">{item.description || `Article ${idx + 1}`}</div>
+                              {item.reference && (
+                                <div className="text-xs text-gray-500 mt-0.5">Réf: {item.reference}</div>
+                              )}
+                            </div>
+                            {isAllocated && (
+                              <span className="text-xs text-green-700 font-medium" title="Déjà ventilé">
+                                ✓ Ventilé
+                              </span>
+                            )}
+                          </div>
+                          <div className="flex justify-between text-gray-600 mt-1">
+                            <span>Qté: {item.quantity || 1} × {Number(item.unit_price || 0).toFixed(2)} €</span>
+                            <span className="font-semibold">{Number(item.total_price || 0).toFixed(2)} €</span>
+                          </div>
+                          {(() => {
+                            const normalizedRate = normalizeTaxRate(item.tax_rate, invoice?.extracted_data?.supplier_name)
+                            return normalizedRate !== null ? (
+                              <div className="text-gray-500 mt-0.5">TVA: {normalizedRate.toFixed(2)}%</div>
+                            ) : null
+                          })()}
+                        </div>
+                      )
+                    })}
+                  </div>
+                </div>
+              )}
             </div>
 
-            <div className="bg-white shadow rounded p-4">
+            <div className="bg-white shadow rounded p-4" data-section="ventilation">
               <div className="flex items-center justify-between mb-4">
                 <h2 className="text-sm font-semibold text-gray-900">Ventilation comptable</h2>
                 <Button size="sm" onClick={addRow}>+ Ajouter une ligne</Button>
@@ -1561,33 +1821,33 @@ export default function InvoiceEditPage() {
                             </optgroup>
                           ) : (
                             <>
-                              <optgroup label="Achats et approvisionnements">
-                                <option value="601">601 - Matières premières</option>
-                                <option value="602">602 - Autres approvisionnements</option>
-                                <option value="606">606 - Fournitures</option>
-                                <option value="6061">6061 - Eau, énergie</option>
-                                <option value="6063">6063 - Entretien et petit équipement</option>
-                                <option value="6064">6064 - Fournitures administratives</option>
-                                <option value="6068">6068 - Autres fournitures</option>
-                                <option value="607">607 - Marchandises (alimentaire, boissons)</option>
-                              </optgroup>
-                              <optgroup label="Services extérieurs">
-                                <option value="611">611 - Sous-traitance</option>
-                                <option value="613">613 - Locations</option>
-                                <option value="615">615 - Entretien et réparations</option>
-                                <option value="622">622 - Honoraires</option>
-                                <option value="623">623 - Publicité et marketing</option>
-                                <option value="624">624 - Transports</option>
-                                <option value="6251">6251 - Voyages et déplacements</option>
-                                <option value="6256">6256 - Missions</option>
-                                <option value="6257">6257 - Réceptions</option>
-                                <option value="626">626 - Télécommunications</option>
-                                <option value="627">627 - Services bancaires</option>
-                                <option value="628">628 - Autres services</option>
-                              </optgroup>
-                              <optgroup label="TVA">
-                                <option value="44566">44566 - TVA déductible</option>
-                              </optgroup>
+                          <optgroup label="Achats et approvisionnements">
+                            <option value="601">601 - Matières premières</option>
+                            <option value="602">602 - Autres approvisionnements</option>
+                            <option value="606">606 - Fournitures</option>
+                            <option value="6061">6061 - Eau, énergie</option>
+                            <option value="6063">6063 - Entretien et petit équipement</option>
+                            <option value="6064">6064 - Fournitures administratives</option>
+                            <option value="6068">6068 - Autres fournitures</option>
+                            <option value="607">607 - Marchandises (alimentaire, boissons)</option>
+                          </optgroup>
+                          <optgroup label="Services extérieurs">
+                            <option value="611">611 - Sous-traitance</option>
+                            <option value="613">613 - Locations</option>
+                            <option value="615">615 - Entretien et réparations</option>
+                            <option value="622">622 - Honoraires</option>
+                            <option value="623">623 - Publicité et marketing</option>
+                            <option value="624">624 - Transports</option>
+                            <option value="6251">6251 - Voyages et déplacements</option>
+                            <option value="6256">6256 - Missions</option>
+                            <option value="6257">6257 - Réceptions</option>
+                            <option value="626">626 - Télécommunications</option>
+                            <option value="627">627 - Services bancaires</option>
+                            <option value="628">628 - Autres services</option>
+                          </optgroup>
+                          <optgroup label="TVA">
+                            <option value="44566">44566 - TVA déductible</option>
+                          </optgroup>
                             </>
                           )}
                         </select>
@@ -1616,7 +1876,11 @@ export default function InvoiceEditPage() {
                             const v = VAT_PRESETS.find(p => p.code === (row.vat_code || ''))
                             return v ? `${v.code} — ${v.label} (${v.rate}%)` : 'Sans TVA'
                           })()}
-                          onChange={(e) => updateRow(idx, { vat_code: e.target.value })}
+                          onChange={(e) => {
+                            const newVatCode = e.target.value
+                            const newVatRate = vatRateFromCode(newVatCode)
+                            updateRow(idx, { vat_code: newVatCode, vat_rate: newVatRate })
+                          }}
                         >
                           <option value="" className="text-gray-400">Sans TVA</option>
                           {orgVatCodes.length > 0 ? (
@@ -1627,19 +1891,19 @@ export default function InvoiceEditPage() {
                             </optgroup>
                           ) : (
                             <>
-                              <optgroup label="TVA Taux normal (20%)">
-                                <option value="002">002 - TVA déductible B&S</option>
-                                <option value="B5">B5 - TVA déductible Prestations</option>
-                                <option value="I5">I5 - TVA Immobilisations</option>
-                              </optgroup>
-                              <optgroup label="TVA Taux intermédiaire (10%)">
-                                <option value="A6">A6 - TVA déductible B&S</option>
-                                <option value="B6">B6 - TVA déductible Prestations</option>
-                              </optgroup>
-                              <optgroup label="TVA Taux réduit (5.5%)">
-                                <option value="A2">A2 - TVA déductible B&S</option>
-                                <option value="B2">B2 - TVA déductible Prestations</option>
-                              </optgroup>
+                          <optgroup label="TVA Taux normal (20%)">
+                            <option value="002">002 - TVA déductible B&S</option>
+                            <option value="B5">B5 - TVA déductible Prestations</option>
+                            <option value="I5">I5 - TVA Immobilisations</option>
+                          </optgroup>
+                          <optgroup label="TVA Taux intermédiaire (10%)">
+                            <option value="A6">A6 - TVA déductible B&S</option>
+                            <option value="B6">B6 - TVA déductible Prestations</option>
+                          </optgroup>
+                          <optgroup label="TVA Taux réduit (5.5%)">
+                            <option value="A2">A2 - TVA déductible B&S</option>
+                            <option value="B2">B2 - TVA déductible Prestations</option>
+                          </optgroup>
                             </>
                           )}
                         </select>
@@ -1649,7 +1913,7 @@ export default function InvoiceEditPage() {
                       <div className="col-span-2">
                         <label className="block text-xs font-medium text-gray-700 mb-1">Montant HT</label>
                         <div className="relative">
-                          <Input
+                          <Input 
                             type="text"
                             inputMode="decimal"
                             value={row.amount_input}
@@ -1711,20 +1975,210 @@ export default function InvoiceEditPage() {
               {allocations.length > 0 && (
                 <div className="mt-4 pt-4 border-t border-gray-200">
                   <div className="flex justify-between items-center text-sm">
-                    <span className="font-medium text-gray-700">Total ventilé:</span>
+                      <span className="font-medium text-gray-700">Total ventilé (HT):</span>
                     <span className="text-lg font-semibold text-gray-900">
-                      {allocations.reduce((sum, row) => sum + totalForRow(row), 0).toFixed(2)} €
+                        {(() => {
+                          // Calculer le total HT des ventilations (somme des amount)
+                          const totalHT = allocations.reduce((sum, row) => sum + Number(row.amount || 0), 0)
+                          const totalTTC = allocations.reduce((sum, row) => sum + totalForRow(row), 0)
+                          const totalTVA = totalTTC - totalHT
+                          
+                          // Log détaillé des ventilations
+                          console.log('📊 [VENTILATION] === RÉCAPITULATIF DES VENTILATIONS ===')
+                          allocations.forEach((row, idx) => {
+                            const itemIndices = Array.isArray(row.item_indices) ? row.item_indices : []
+                            const itemsDetails = itemIndices.map((itemIdx: number) => {
+                              const item = invoice?.extracted_data?.items?.[itemIdx]
+                              if (!item) return null
+                              const amounts = calculateItemAmounts(item)
+                              return {
+                                index: itemIdx,
+                                description: item.description || `Article ${itemIdx + 1}`,
+                                quantity: Number(item.quantity || 1),
+                                unit_price: Number(item.unit_price || 0),
+                                total_price: amounts.ttc,
+                                tax_rate: Number(item.tax_rate || 0),
+                                calculatedHT: amounts.ht,
+                                calculatedTVA: amounts.tva
+                              }
+                            }).filter(Boolean)
+                            
+                            const rowHT = Number(row.amount || 0)
+                            const rowTVA = taxForRow(row)
+                            const rowTTC = totalForRow(row)
+                            
+                            console.log(`📊 [VENTILATION] Ligne ${idx + 1}:`, {
+                              compte: row.account_code,
+                              libellé: row.label,
+                              'HT (€)': rowHT.toFixed(2),
+                              'TVA (€)': rowTVA.toFixed(2),
+                              'TTC (€)': rowTTC.toFixed(2),
+                              'TVA (%)': row.vat_rate?.toFixed(2) || row.vat_code || 'N/A',
+                              'Articles associés': itemsDetails.length > 0 ? itemsDetails.map((i: any) => ({
+                                description: i.description,
+                                'HT (€)': i.calculatedHT.toFixed(2),
+                                'TVA (€)': i.calculatedTVA.toFixed(2),
+                                'TTC (€)': i.total_price.toFixed(2),
+                                'TVA (%)': i.tax_rate.toFixed(2)
+                              })) : 'Aucun (saisie manuelle)',
+                              'item_indices': itemIndices
+                            })
+                            
+                            if (itemsDetails.length > 0) {
+                              const itemsTotalHT = itemsDetails.reduce((sum: number, item: any) => sum + item.calculatedHT, 0)
+                              const itemsTotalTTC = itemsDetails.reduce((sum: number, item: any) => sum + item.total_price, 0)
+                              console.log(`📊 [VENTILATION]   → Somme HT des articles: ${itemsTotalHT.toFixed(2)} € (devrait correspondre au HT de la ligne: ${rowHT.toFixed(2)} €)`)
+                              console.log(`📊 [VENTILATION]   → Somme TTC des articles: ${itemsTotalTTC.toFixed(2)} € (devrait correspondre au TTC de la ligne: ${rowTTC.toFixed(2)} €)`)
+                              console.log(`📊 [VENTILATION]   → Différence HT: ${(rowHT - itemsTotalHT).toFixed(2)} €`)
+                              console.log(`📊 [VENTILATION]   → Différence TTC: ${(rowTTC - itemsTotalTTC).toFixed(2)} €`)
+                            }
+                          })
+                          
+                          // Calculer le total réel à partir des articles extraits (en HT)
+                          let calculatedInvoiceTotalHT = 0
+                          if (invoice?.extracted_data?.items && Array.isArray(invoice.extracted_data.items)) {
+                            invoice.extracted_data.items.forEach((item: any) => {
+                              const amounts = calculateItemAmounts(item)
+                              calculatedInvoiceTotalHT += amounts.ht
+                            })
+                          }
+                          const invoiceTotal = Number(invoice?.extracted_data?.total_amount || 0)
+                          const invoiceTotalHT = calculatedInvoiceTotalHT > 0 ? calculatedInvoiceTotalHT : (invoiceTotal - Number(invoice?.extracted_data?.tax_amount || 0))
+                          
+                          console.log('📊 [VENTILATION] Total ventilé (HT):', totalHT.toFixed(2) + ' €')
+                          console.log('📊 [VENTILATION] Total ventilé (TTC):', totalTTC.toFixed(2) + ' €')
+                          console.log('📊 [VENTILATION] Total ventilé (TVA):', totalTVA.toFixed(2) + ' €')
+                          console.log('📊 [VENTILATION] Total facture (extrait):', invoiceTotal.toFixed(2) + ' €')
+                          console.log('📊 [VENTILATION] Total facture HT (calculé depuis articles):', calculatedInvoiceTotalHT.toFixed(2) + ' €')
+                          console.log('📊 [VENTILATION] Total facture HT (utilisé):', invoiceTotalHT.toFixed(2) + ' €')
+                          console.log('📊 [VENTILATION] Différence HT:', (invoiceTotalHT - totalHT).toFixed(2) + ' €')
+                          
+                          // Vérifier si la différence correspond à la TVA attendue (cas normal: articles en HT, total extrait en TTC)
+                          const difference = Math.abs(calculatedInvoiceTotalHT - invoiceTotal)
+                          const extractedTax = Number(invoice?.extracted_data?.tax_amount || 0)
+                          const calculatedTax = invoiceTotal - calculatedInvoiceTotalHT
+                          const isTaxDifference = Math.abs(difference - extractedTax) < 0.02 || Math.abs(difference - calculatedTax) < 0.02
+                          
+                          // Afficher l'avertissement seulement si la différence ne correspond pas à la TVA
+                          if (difference > 0.01 && calculatedInvoiceTotalHT > 0 && !isTaxDifference) {
+                            console.log('⚠️ [VENTILATION] ATTENTION: Le total extrait ne correspond pas à la somme des articles!')
+                            console.log('⚠️ [VENTILATION]   → Utilisez le total calculé (' + calculatedInvoiceTotalHT.toFixed(2) + ' € HT) pour les ventilations.')
+                          } else if (difference > 0.01 && isTaxDifference) {
+                            console.log('ℹ️ [VENTILATION] La différence correspond à la TVA (normal: articles en HT, total extrait en TTC)')
+                          }
+                          console.log('📊 [VENTILATION] === FIN RÉCAPITULATIF ===')
+                          return totalHT.toFixed(2)
+                        })()} €
+                      </span>
+                  </div>
+                  <div className="flex justify-between items-center text-xs text-gray-500 mt-1">
+                    <span>Total ventilé (TTC):</span>
+                    <span>{allocations.reduce((sum, row) => sum + totalForRow(row), 0).toFixed(2)} €</span>
+                  </div>
+                  <div className="flex justify-between items-center text-xs text-gray-500 mt-1">
+                    <span>Total facture (TTC):</span>
+                    <span>
+                      {(() => {
+                        // Calculer le total TTC réel à partir des articles extraits
+                        let calculatedTotalTTC = 0
+                        if (invoice?.extracted_data?.items && Array.isArray(invoice.extracted_data.items)) {
+                          invoice.extracted_data.items.forEach((item: any) => {
+                            const amounts = calculateItemAmounts(item)
+                            calculatedTotalTTC += amounts.ttc
+                          })
+                        }
+                        const extractedTotal = Number(invoice?.extracted_data?.total_amount || 0)
+                        const displayTotalTTC = calculatedTotalTTC > 0 ? calculatedTotalTTC : extractedTotal
+                        return displayTotalTTC.toFixed(2)
+                      })()} €
                     </span>
                   </div>
                   <div className="flex justify-between items-center text-xs text-gray-600 mt-1">
-                    <span>Total facture:</span>
-                    <span className="font-medium">{invoiceTotal.toFixed(2)} €</span>
+                    <span>Total facture (HT):</span>
+                    <span className="font-medium">
+                      {(() => {
+                        // Calculer le total HT réel à partir des articles extraits
+                        let calculatedTotalHT = 0
+                        if (invoice?.extracted_data?.items && Array.isArray(invoice.extracted_data.items)) {
+                          invoice.extracted_data.items.forEach((item: any) => {
+                            const amounts = calculateItemAmounts(item)
+                            calculatedTotalHT += amounts.ht
+                          })
+                        }
+                        const extractedTotal = Number(invoice?.extracted_data?.total_amount || 0)
+                        const extractedTax = Number(invoice?.extracted_data?.tax_amount || 0)
+                        const extractedTotalHT = extractedTotal - extractedTax
+                        const displayTotalHT = calculatedTotalHT > 0 ? calculatedTotalHT : extractedTotalHT
+                        const difference = Math.abs(calculatedTotalHT - extractedTotal)
+                        const calculatedTax = extractedTotal - calculatedTotalHT
+                        const isTaxDifference = Math.abs(difference - extractedTax) < 0.02 || Math.abs(difference - calculatedTax) < 0.02
+                        // Afficher l'avertissement seulement si la différence ne correspond pas à la TVA
+                        const hasDifference = calculatedTotalHT > 0 && difference > 0.01 && !isTaxDifference
+                        
+                        return (
+                          <>
+                            {displayTotalHT.toFixed(2)} €
+                            {hasDifference && (
+                              <span className="text-orange-600 text-xs ml-1">⚠️ (extrait: {extractedTotal.toFixed(2)} € TTC)</span>
+                            )}
+                          </>
+                        )
+                      })()}
+                    </span>
                   </div>
-                  {Math.abs(allocations.reduce((sum, row) => sum + totalForRow(row), 0) - invoiceTotal) > 0.01 && (
+                  {(() => {
+                    // Calculer le total HT et TTC des ventilations
+                    const totalVentileHT = allocations.reduce((sum, row) => sum + Number(row.amount || 0), 0)
+                    const totalVentileTTC = allocations.reduce((sum, row) => sum + totalForRow(row), 0)
+                    
+                    // Calculer le total HT et TTC réel à partir des articles extraits
+                    let calculatedTotalHT = 0
+                    let calculatedTotalTTC = 0
+                    if (invoice?.extracted_data?.items && Array.isArray(invoice.extracted_data.items)) {
+                      invoice.extracted_data.items.forEach((item: any) => {
+                        const amounts = calculateItemAmounts(item)
+                        calculatedTotalHT += amounts.ht
+                        calculatedTotalTTC += amounts.ttc
+                      })
+                    }
+                    const extractedTotal = Number(invoice?.extracted_data?.total_amount || 0)
+                    const extractedTax = Number(invoice?.extracted_data?.tax_amount || 0)
+                    const extractedTotalHT = extractedTotal - extractedTax
+                    const expectedTotalHT = calculatedTotalHT > 0 ? calculatedTotalHT : extractedTotalHT
+                    const expectedTotalTTC = calculatedTotalTTC > 0 ? calculatedTotalTTC : extractedTotal
+                    
+                    // Vérifier si la différence correspond à la TVA attendue
+                    const difference = Math.abs(calculatedTotalHT - extractedTotal)
+                    const calculatedTax = extractedTotal - calculatedTotalHT
+                    const isTaxDifference = Math.abs(difference - extractedTax) < 0.02 || Math.abs(difference - calculatedTax) < 0.02
+                    const hasRealDifference = calculatedTotalHT > 0 && difference > 0.01 && !isTaxDifference
+                    
+                    const hasHTDifference = Math.abs(totalVentileHT - expectedTotalHT) > 0.01
+                    const hasTTCDifference = Math.abs(totalVentileTTC - expectedTotalTTC) > 0.01
+                    
+                    if (hasHTDifference || hasTTCDifference) {
+                      return (
                     <div className="mt-2 text-xs text-orange-600 bg-orange-50 px-3 py-2 rounded">
-                      ⚠️ La somme des ventilations ne correspond pas au total de la facture
+                          {hasHTDifference && (
+                            <div>
+                              ⚠️ La somme des ventilations HT ({totalVentileHT.toFixed(2)} €) ne correspond pas au total calculé HT ({expectedTotalHT.toFixed(2)} €)
                     </div>
                   )}
+                          {hasTTCDifference && (
+                            <div className={hasHTDifference ? 'mt-2' : ''}>
+                              ⚠️ La somme des ventilations TTC ({totalVentileTTC.toFixed(2)} €) ne correspond pas au total calculé TTC ({expectedTotalTTC.toFixed(2)} €). Vérifiez les taux de TVA sélectionnés.
+                            </div>
+                          )}
+                          {hasRealDifference && (
+                            <div className="mt-1 text-xs">
+                              Le total extrait ({extractedTotal.toFixed(2)} € TTC) ne correspond pas à la somme des articles ({calculatedTotalHT.toFixed(2)} € HT). Utilisez le total calculé.
+                            </div>
+                          )}
+                        </div>
+                      )
+                    }
+                    return null
+                  })()}
                 </div>
               )}
 
@@ -1738,8 +2192,8 @@ export default function InvoiceEditPage() {
                 <div className="max-w-4xl mx-auto px-3 py-2 flex items-center justify-between gap-2">
                   <div className="text-xs text-gray-600">
                     <div className="flex items-center gap-2">
-                      <span className="font-medium">Total ventilé:</span>
-                      <span>{allocations.reduce((s,r)=> s + totalForRow(r), 0).toFixed(2)} €</span>
+                      <span className="font-medium">Total ventilé (HT):</span>
+                      <span>{allocations.reduce((s,r)=> s + Number(r.amount || 0), 0).toFixed(2)} €</span>
                     </div>
                     <div className="flex items-center gap-2">
                       <span className="text-gray-500">Facture:</span>
@@ -1782,10 +2236,38 @@ export default function InvoiceEditPage() {
 
               <div className="hidden lg:block" style={{ width: `${previewWidth}%`, transition: isResizing ? 'none' : 'width 0.3s', paddingLeft: '12px' }}>
                 <div className="bg-white shadow rounded p-2 sticky top-6" style={{ height: 'calc(100vh - 120px)' }}>
-                <div className="flex items-center justify-between mb-2 px-2 border-b pb-2">
-                  <h2 className="text-sm font-semibold text-gray-900">Aperçu PDF</h2>
+                  {/* Onglets */}
+                  <div className="flex items-center border-b border-gray-200 mb-2">
+                    <button
+                      onClick={() => setRightPanelTab('pdf')}
+                      className={`flex-1 px-3 py-2 text-sm font-medium transition-colors ${
+                        rightPanelTab === 'pdf'
+                          ? 'text-blue-600 border-b-2 border-blue-600 bg-blue-50'
+                          : 'text-gray-600 hover:text-gray-900 hover:bg-gray-50'
+                      }`}
+                    >
+                      📄 Aperçu PDF
+                    </button>
+                    <button
+                      onClick={() => setRightPanelTab('invoice')}
+                      className={`flex-1 px-3 py-2 text-sm font-medium transition-colors ${
+                        rightPanelTab === 'invoice'
+                          ? 'text-blue-600 border-b-2 border-blue-600 bg-blue-50'
+                          : 'text-gray-600 hover:text-gray-900 hover:bg-gray-50'
+                      }`}
+                    >
+                      📋 Facture extraite
+                    </button>
+                    <Button variant="ghost" size="sm" onClick={() => setShowPreview(false)} className="ml-2">✕</Button>
+                  </div>
+
+                  {/* Contenu selon l'onglet */}
+                  {rightPanelTab === 'pdf' ? (
+                    <>
+                      {/* Contrôles PDF */}
+                      <div className="flex items-center justify-between mb-2 px-2">
                   <div className="flex items-center space-x-2">
-                <div className="flex items-center space-x-1 border rounded px-2 py-1">
+                    <div className="flex items-center space-x-1 border rounded px-2 py-1">
                       <button 
                         onClick={() => setPdfZoom(Math.max(50, pdfZoom - 10))}
                         className="text-gray-600 hover:text-gray-900 text-lg font-bold"
@@ -1802,28 +2284,28 @@ export default function InvoiceEditPage() {
                         +
                       </button>
                     </div>
-                <div className="flex items-center space-x-1 border rounded px-2 py-1">
-                  <button 
-                    onClick={() => setPdfRotation((r) => (r - 90 + 360) % 360)}
-                    className="text-gray-600 hover:text-gray-900 text-sm font-bold"
-                    title="Rotation gauche 90°"
-                  >
-                    ⟲
-                  </button>
-                  <span className="text-xs text-gray-600 min-w-[28px] text-center">{pdfRotation}°</span>
-                  <button 
-                    onClick={() => setPdfRotation((r) => (r + 90) % 360)}
-                    className="text-gray-600 hover:text-gray-900 text-sm font-bold"
-                    title="Rotation droite 90°"
-                  >
-                    ⟳
-                  </button>
-                </div>
-                    <Button variant="ghost" size="sm" onClick={() => setShowPreview(false)}>✕</Button>
+                          <div className="flex items-center space-x-1 border rounded px-2 py-1">
+                            <button 
+                              onClick={() => setPdfRotation((r) => (r - 90 + 360) % 360)}
+                              className="text-gray-600 hover:text-gray-900 text-sm font-bold"
+                              title="Rotation gauche 90°"
+                            >
+                              ⟲
+                            </button>
+                            <span className="text-xs text-gray-600 min-w-[28px] text-center">{pdfRotation}°</span>
+                            <button 
+                              onClick={() => setPdfRotation((r) => (r + 90) % 360)}
+                              className="text-gray-600 hover:text-gray-900 text-sm font-bold"
+                              title="Rotation droite 90°"
+                            >
+                              ⟳
+                            </button>
                   </div>
                 </div>
+                      </div>
+                      {/* PDF Viewer */}
                 {pdfUrl ? (
-                  <div className="w-full h-[calc(100%-50px)] overflow-auto">
+                        <div className="w-full h-[calc(100%-100px)] overflow-auto">
                     <iframe 
                       src={`${pdfUrl}#view=FitH&toolbar=0&navpanes=0&scrollbar=1`} 
                       className="rounded border" 
@@ -1831,14 +2313,14 @@ export default function InvoiceEditPage() {
                         width: '100%', 
                         height: '100%',
                         minHeight: '100%',
-                        transform: (() => {
-                          const r = ((pdfRotation % 360) + 360) % 360
-                          const s = pdfZoom / 100
-                          if (r === 90) return `rotate(90deg) translateY(-100%) scale(${s})`
-                          if (r === 180) return `rotate(180deg) translate(-100%, -100%) scale(${s})`
-                          if (r === 270) return `rotate(270deg) translateX(-100%) scale(${s})`
-                          return `rotate(0deg) scale(${s})`
-                        })(),
+                              transform: (() => {
+                                const r = ((pdfRotation % 360) + 360) % 360
+                                const s = pdfZoom / 100
+                                if (r === 90) return `rotate(90deg) translateY(-100%) scale(${s})`
+                                if (r === 180) return `rotate(180deg) translate(-100%, -100%) scale(${s})`
+                                if (r === 270) return `rotate(270deg) translateX(-100%) scale(${s})`
+                                return `rotate(0deg) scale(${s})`
+                              })(),
                         transformOrigin: 'top left'
                       }} 
                       onError={(e) => {
@@ -1851,16 +2333,566 @@ export default function InvoiceEditPage() {
                     />
                   </div>
                 ) : (
-                  <div className="h-full flex items-center justify-center text-sm text-gray-500">
+                        <div className="h-[calc(100%-100px)] flex items-center justify-center text-sm text-gray-500">
                     <div className="text-center">
                       <div className="text-gray-400 mb-2">📄</div>
                       <div>Aucun aperçu disponible</div>
                       <div className="text-xs text-gray-400 mt-1">Le fichier PDF n'a pas été trouvé</div>
                     </div>
                   </div>
+                      )}
+                    </>
+                  ) : (
+                    /* Vue Facture reconstituée */
+                    <div className="h-[calc(100%-50px)] overflow-y-auto">
+                      {invoice?.extracted_data?.items && Array.isArray(invoice.extracted_data.items) && invoice.extracted_data.items.length > 0 ? (
+                        <div className="space-y-3 p-2">
+                          {/* En-tête de la facture */}
+                          <div className="border-b border-gray-200 pb-3 mb-3">
+                            <div className="text-xs text-gray-500 mb-1">Fournisseur</div>
+                            <div className="font-semibold text-sm">{invoice.extracted_data.supplier_name || '—'}</div>
+                            {invoice.extracted_data.invoice_number && (
+                              <>
+                                <div className="text-xs text-gray-500 mt-2 mb-1">N° facture</div>
+                                <div className="text-sm">{invoice.extracted_data.invoice_number}</div>
+                              </>
+                            )}
+                            {invoice.extracted_data.invoice_date && (
+                              <>
+                                <div className="text-xs text-gray-500 mt-2 mb-1">Date</div>
+                                <div className="text-sm">{formatShortDate(invoice.extracted_data.invoice_date)}</div>
+                              </>
                 )}
               </div>
+
+                          {/* Articles avec checkboxes */}
+                          <div className="space-y-4">
+                            <div className="flex items-center justify-between mb-2">
+                              <div className="text-xs font-semibold text-gray-700">
+                                Articles ({invoice.extracted_data.items.length})
+                                {(() => {
+                                  const unallocatedCount = invoice.extracted_data.items.filter((_: any, idx: number) => !allocatedItemIndices.has(idx)).length
+                                  return unallocatedCount > 0 ? (
+                                    <span className="ml-2 text-orange-600 font-bold">
+                                      • {unallocatedCount} à ventiler
+                                    </span>
+                                  ) : null
+                                })()}
             </div>
+                              <div className="flex items-center gap-2">
+                                {(() => {
+                                  const unallocatedCount = invoice.extracted_data.items.filter((_: any, idx: number) => !allocatedItemIndices.has(idx)).length
+                                  return unallocatedCount > 0 ? (
+                                    <Button
+                                      size="sm"
+                                      variant="outline"
+                                      className="text-xs h-7"
+                                      onClick={() => {
+                                        // Sélectionner tous les articles non ventilés
+                                        const allUnallocatedIndices = new Set<number>(
+                                          invoice.extracted_data.items
+                                            .map((_: any, idx: number) => idx)
+                                            .filter((idx: number) => !allocatedItemIndices.has(idx))
+                                        )
+                                        setSelectedItemsForAllocation(allUnallocatedIndices)
+                                      }}
+                                    >
+                                      ✓ Tout sélectionner
+                                    </Button>
+                                  ) : null
+                                })()}
+                                <Button
+                                size="sm"
+                                variant="outline"
+                                className="text-xs"
+                                disabled={retrying || invoice?.status === 'processing' || invoice?.status === 'queued'}
+                                onClick={async () => {
+                                  try {
+                                    setRetrying(true)
+                                    setError(null)
+                                    const { data: { session } } = await supabase.auth.getSession()
+                                    const token = session?.access_token || ''
+                                    
+                                    const addRes = await fetch('/api/queue/add', {
+                                      method: 'POST',
+                                      headers: {
+                                        'Content-Type': 'application/json',
+                                        ...(token ? { Authorization: `Bearer ${token}` } : {})
+                                      },
+                                      body: JSON.stringify({ invoiceId: params.id })
+                                    })
+                                    
+                                    const addData = await addRes.json()
+                                    if (!addRes.ok) {
+                                      throw new Error(addData.error || 'Impossible de relancer l\'extraction')
+                                    }
+                                    
+                                    setInvoice((prev: any) => prev ? { ...prev, status: 'queued' } : prev)
+                                    
+                                    const poll = async () => {
+                                      try {
+                                        const statusRes = await fetch(`/api/queue/status?invoiceId=${params.id}`, {
+                                          headers: token ? { Authorization: `Bearer ${token}` } : undefined
+                                        })
+                                        const statusData = await statusRes.json()
+                                        if (statusData.status === 'completed' || statusData.status === 'failed') {
+                                          const rr = await fetch(`/api/invoices/${params.id}`, {
+                                            headers: token ? { Authorization: `Bearer ${token}` } : undefined
+                                          })
+                                          const dd = await rr.json()
+                                          if (rr.ok) {
+                                            setInvoice(dd.invoice)
+                                            setRetrying(false)
+                                          }
+                                        } else if (statusData.status === 'processing') {
+                                          setInvoice((prev: any) => prev ? { ...prev, status: 'processing' } : prev)
+                                          setTimeout(poll, 4000)
+                                        } else {
+                                          setTimeout(poll, 4000)
+                                        }
+                                      } catch {}
+                                    }
+                                    poll()
+                                  } catch (e: any) {
+                                    setError(e.message)
+                                    setRetrying(false)
+                                  }
+                                }}
+                              >
+                                {retrying || invoice?.status === 'processing' || invoice?.status === 'queued' 
+                                  ? '⏳ Extraction...' 
+                                  : '🔄 Relancer'}
+                              </Button>
+                              </div>
+                            </div>
+                            
+                            {/* Articles non ventilés */}
+                            {(() => {
+                              const unallocatedItems = invoice.extracted_data.items
+                                .map((item: any, idx: number) => ({ item, idx }))
+                                .filter(({ idx }: { idx: number }) => !allocatedItemIndices.has(idx))
+                              
+                              if (unallocatedItems.length === 0) {
+                                return null
+                              }
+                              
+                              return (
+                                <div className="space-y-2">
+                                  <div className="flex items-center justify-between">
+                                    <div className="text-xs font-semibold text-orange-700 bg-orange-50 px-2 py-1 rounded">
+                                      ⚠️ {unallocatedItems.length} article{unallocatedItems.length > 1 ? 's' : ''} à ventiler
+                                    </div>
+                                    <Button
+                                      size="sm"
+                                      variant="outline"
+                                      className="text-xs h-7"
+                                      onClick={() => {
+                                        // Sélectionner tous les articles non ventilés
+                                        const allUnallocatedIndices = new Set<number>(
+                                          invoice.extracted_data.items
+                                            .map((_: any, idx: number) => idx)
+                                            .filter((idx: number) => !allocatedItemIndices.has(idx))
+                                        )
+                                        setSelectedItemsForAllocation(allUnallocatedIndices)
+                                      }}
+                                    >
+                                      ✓ Tout sélectionner
+                                    </Button>
+                                  </div>
+                                  {unallocatedItems.map(({ item, idx }: { item: any, idx: number }) => {
+                                    const isSelected = selectedItemsForAllocation.has(idx)
+                                    const amounts = calculateItemAmounts(item)
+                                    const itemHT = amounts.ht
+                                    const itemTTC = amounts.ttc
+                                    
+                                    return (
+                                      <div
+                                        key={idx}
+                                        className={`border rounded-lg p-3 transition-all ${
+                                          isSelected
+                                            ? 'border-blue-500 bg-blue-50 shadow-sm'
+                                            : 'border-gray-200 bg-white hover:border-gray-300'
+                                        }`}
+                                      >
+                                        <div className="flex items-start gap-3">
+                                          <div className="mt-1">
+                                            <input
+                                              type="checkbox"
+                                              checked={isSelected}
+                                              onChange={() => {
+                                                const newSet = new Set(selectedItemsForAllocation)
+                                                if (isSelected) {
+                                                  newSet.delete(idx)
+                                                } else {
+                                                  newSet.add(idx)
+                                                }
+                                                setSelectedItemsForAllocation(newSet)
+                                              }}
+                                              className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+                                            />
+                                          </div>
+                                          <div className="flex-1 min-w-0">
+                                            <div className="font-medium text-sm text-gray-900 mb-1">
+                                              {item.description || `Article ${idx + 1}`}
+                                            </div>
+                                            {item.reference && (
+                                              <div className="text-xs text-gray-500 mb-2">Réf: {item.reference}</div>
+                                            )}
+                                            <div className="grid grid-cols-3 gap-2 text-xs">
+                                              <div>
+                                                <span className="text-gray-500">Qté:</span>
+                                                <div className="font-semibold">{item.quantity || 1}</div>
+                                              </div>
+                                              <div>
+                                                <span className="text-gray-500">P.U.:</span>
+                                                <div className="font-semibold">{Number(item.unit_price || 0).toFixed(2)} €</div>
+                                              </div>
+                                              <div>
+                                                <span className="text-gray-500">HT:</span>
+                                                <div className="font-semibold">{round2(itemHT).toFixed(2)} €</div>
+                                              </div>
+                                            </div>
+                                            {(() => {
+                                              const normalizedRate = normalizeTaxRate(item.tax_rate, invoice?.extracted_data?.supplier_name)
+                                              return normalizedRate !== null ? (
+                                                <div className="mt-1 text-xs text-gray-500">TVA: {normalizedRate.toFixed(2)}%</div>
+                                              ) : null
+                                            })()}
+                                          </div>
+                                        </div>
+                                      </div>
+                                    )
+                                  })}
+                                </div>
+                              )
+                            })()}
+                            
+                            {/* Articles ventilés */}
+                            {(() => {
+                              const allocatedItems = invoice.extracted_data.items
+                                .map((item: any, idx: number) => ({ item, idx }))
+                                .filter(({ idx }: { idx: number }) => allocatedItemIndices.has(idx))
+                              
+                              if (allocatedItems.length === 0) {
+                                return null
+                              }
+                              
+                              return (
+                                <div className="space-y-2 mt-4">
+                                  <div className="text-xs font-semibold text-green-700 bg-green-50 px-2 py-1 rounded">
+                                    ✓ {allocatedItems.length} article{allocatedItems.length > 1 ? 's' : ''} ventilé{allocatedItems.length > 1 ? 's' : ''}
+                                  </div>
+                                  {allocatedItems.map(({ item, idx }: { item: any, idx: number }) => {
+                                    const amounts = calculateItemAmounts(item)
+                                    const itemHT = amounts.ht
+                                    const itemTTC = amounts.ttc
+                                    
+                                    return (
+                                      <div
+                                        key={idx}
+                                        className="border border-green-300 bg-green-50 rounded-lg p-3 opacity-75"
+                                      >
+                                        <div className="flex items-start gap-3">
+                                          <div className="mt-1">
+                                            <span className="text-xs text-green-700 font-medium" title="Déjà ventilé">
+                                              ✓
+                                            </span>
+                                          </div>
+                                          <div className="flex-1 min-w-0">
+                                            <div className="font-medium text-sm text-gray-900 mb-1">
+                                              {item.description || `Article ${idx + 1}`}
+                                            </div>
+                                            {item.reference && (
+                                              <div className="text-xs text-gray-500 mb-2">Réf: {item.reference}</div>
+                                            )}
+                                            <div className="grid grid-cols-3 gap-2 text-xs">
+                                              <div>
+                                                <span className="text-gray-500">Qté:</span>
+                                                <div className="font-semibold">{item.quantity || 1}</div>
+                                              </div>
+                                              <div>
+                                                <span className="text-gray-500">P.U.:</span>
+                                                <div className="font-semibold">{Number(item.unit_price || 0).toFixed(2)} €</div>
+                                              </div>
+                                              <div>
+                                                <span className="text-gray-500">HT:</span>
+                                                <div className="font-semibold">{round2(itemHT).toFixed(2)} €</div>
+                                              </div>
+                                            </div>
+                                            {(() => {
+                                              const normalizedRate = normalizeTaxRate(item.tax_rate, invoice?.extracted_data?.supplier_name)
+                                              return normalizedRate !== null ? (
+                                                <div className="mt-1 text-xs text-gray-500">TVA: {normalizedRate.toFixed(2)}%</div>
+                                              ) : null
+                                            })()}
+                                          </div>
+                                        </div>
+                                      </div>
+                                    )
+                                  })}
+                                </div>
+                              )
+                            })()}
+                          </div>
+
+                          {/* Bouton pour créer une ventilation depuis les articles sélectionnés */}
+                          {selectedItemsForAllocation.size > 0 && (
+                            <div className="mt-4 p-3 bg-blue-50 border border-blue-200 rounded-lg">
+                              <div className="text-xs font-semibold text-blue-900 mb-2">
+                                {selectedItemsForAllocation.size} article{selectedItemsForAllocation.size > 1 ? 's' : ''} sélectionné{selectedItemsForAllocation.size > 1 ? 's' : ''}
+                              </div>
+                              <div className="text-xs text-gray-600 mb-3">
+                                Total: {(() => {
+                                  let totalHT = 0
+                                  selectedItemsForAllocation.forEach((idx) => {
+                                    const item = invoice.extracted_data.items[idx]
+                                    const amounts = calculateItemAmounts(item)
+                                    const itemHT = amounts.ht
+                                    totalHT += itemHT
+                                  })
+                                  return totalHT.toFixed(2)
+                                })()} € HT
+                              </div>
+                              <Button
+                                size="sm"
+                                className="w-full bg-blue-600 hover:bg-blue-700 text-white text-xs"
+                                onClick={() => {
+                                  // Calculer le montant HT total pour les articles sélectionnés
+                                  // BASE: On part du HT (et non du TTC) pour les calculs
+                                  // Le montant HT reste tel quel, la TVA sera calculée à partir du code TVA choisi
+                                  let totalHT = 0
+                                  const selectedItemsDetails: Array<{
+                                    idx: number
+                                    description: string
+                                    quantity: number
+                                    unit_price: number
+                                    total_price: number
+                                    tax_rate: number
+                                    calculatedHT: number
+                                    calculatedTVA: number
+                                  }> = []
+                                  
+                                  selectedItemsForAllocation.forEach((idx) => {
+                                    const item = invoice.extracted_data.items[idx]
+                                    const amounts = calculateItemAmounts(item)
+                                    const itemHT = amounts.ht
+                                    const itemTTC = amounts.ttc
+                                    const itemTVA = amounts.tva
+                                    
+                                    totalHT += itemHT
+                                    
+                                    selectedItemsDetails.push({
+                                      idx,
+                                      description: item.description || `Article ${idx + 1}`,
+                                      quantity: Number(item.quantity || 1),
+                                      unit_price: Number(item.unit_price || 0),
+                                      total_price: itemTTC,
+                                      tax_rate: Number(item.tax_rate || 0),
+                                      calculatedHT: itemHT,
+                                      calculatedTVA: itemTVA
+                                    })
+                                  })
+                                  
+                                  console.log('📊 [VENTILATION] === CRÉATION D\'UNE VENTILATION ===')
+                                  console.log('📊 [VENTILATION] Articles sélectionnés:', selectedItemsDetails.map(i => ({
+                                    index: i.idx,
+                                    description: i.description,
+                                    qty: i.quantity,
+                                    'PU (€)': i.unit_price.toFixed(2),
+                                    'TTC article (€)': i.total_price.toFixed(2),
+                                    'HT calculé (€)': i.calculatedHT.toFixed(2),
+                                    'TVA calculée (€)': i.calculatedTVA.toFixed(2),
+                                    'TVA (%)': i.tax_rate.toFixed(2)
+                                  })))
+                                  console.log('📊 [VENTILATION] Totaux calculés:')
+                                  console.log('📊 [VENTILATION]   - Total HT (somme des HT):', totalHT.toFixed(2) + ' €')
+                                  console.log('📊 [VENTILATION]   - Note: Le montant HT reste tel quel, le code TVA doit être choisi manuellement, la TVA sera calculée automatiquement à partir du code TVA choisi')
+
+                                  // Créer une nouvelle ligne de ventilation avec ces montants
+                                  // Le montant HT est celui calculé depuis les articles
+                                  // Le code TVA doit être choisi par l'utilisateur, la TVA sera calculée automatiquement
+                                  const newRow: AllocationFormRow = {
+                                    account_code: '',
+                                    label: `Articles sélectionnés (${selectedItemsForAllocation.size})`,
+                                    amount: round2(totalHT), // Montant HT (BASE) - reste tel quel
+                                    amount_input: totalHT.toFixed(2).replace('.', ','),
+                                    vat_code: undefined, // L'utilisateur doit choisir le code TVA
+                                    vat_rate: undefined, // Ne pas pré-remplir, sera calculé depuis vat_code
+                                    item_indices: Array.from(selectedItemsForAllocation) // Sauvegarder les indices des articles utilisés
+                                  }
+                                  
+                                  console.log('📊 [VENTILATION] Ligne créée:', {
+                                    label: newRow.label,
+                                    'HT (€)': newRow.amount.toFixed(2),
+                                    'vat_code': newRow.vat_code || '(à choisir)',
+                                    'item_indices': newRow.item_indices
+                                  })
+                                  console.log('📊 [VENTILATION]   → Le montant HT reste tel quel, la TVA sera calculée à partir du code TVA choisi')
+                                  console.log('📊 [VENTILATION] === FIN CRÉATION ===')
+                                  
+                                  setAllocations([...allocations, newRow])
+                                  setSelectedItemsForAllocation(new Set())
+                                  
+                                  // Scroller vers la section de ventilation
+                                  setTimeout(() => {
+                                    const ventilationSection = document.querySelector('[data-section="ventilation"]')
+                                    if (ventilationSection) {
+                                      ventilationSection.scrollIntoView({ behavior: 'smooth', block: 'start' })
+                                    }
+                                  }, 100)
+                                }}
+                              >
+                                ➕ Créer une ventilation
+                              </Button>
+                            </div>
+                          )}
+
+                          {/* Totaux de la facture */}
+                          <div className="mt-4 pt-3 border-t border-gray-200">
+                            {(() => {
+                              // Calculer les totaux réels à partir des articles extraits
+                              let calculatedSubtotal = 0
+                              let calculatedTax = 0
+                              let calculatedTotal = 0
+                              
+                              if (invoice.extracted_data.items && Array.isArray(invoice.extracted_data.items)) {
+                                invoice.extracted_data.items.forEach((item: any) => {
+                                  const amounts = calculateItemAmounts(item)
+                                  calculatedSubtotal += amounts.ht
+                                  calculatedTax += amounts.tva
+                                  calculatedTotal += amounts.ttc
+                                })
+                              }
+                              
+                              const extractedSubtotal = Number(invoice.extracted_data.subtotal || 0)
+                              const extractedTax = Number(invoice.extracted_data.tax_amount || 0)
+                              const extractedTotal = Number(invoice.extracted_data.total_amount || 0)
+                              
+                              // Afficher les totaux calculés (plus fiables) avec indication si différent de extracted_data
+                              const hasDifference = Math.abs(calculatedTotal - extractedTotal) > 0.01
+                              
+                              return (
+                                <>
+                                  <div className="flex justify-between text-xs mb-1">
+                                    <span className="text-gray-600">Sous-total HT:</span>
+                                    <span className="font-semibold">
+                                      {calculatedSubtotal.toFixed(2)} €
+                                      {hasDifference && extractedSubtotal > 0 && (
+                                        <span className="text-gray-400 ml-1">(extrait: {extractedSubtotal.toFixed(2)} €)</span>
+                                      )}
+                                    </span>
+                                  </div>
+                                  <div className="flex justify-between text-xs mb-1">
+                                    <span className="text-gray-600">TVA:</span>
+                                    <span className="font-semibold">
+                                      {calculatedTax.toFixed(2)} €
+                                      {hasDifference && extractedTax > 0 && (
+                                        <span className="text-gray-400 ml-1">(extrait: {extractedTax.toFixed(2)} €)</span>
+                                      )}
+                                    </span>
+                                  </div>
+                                  <div className="flex justify-between text-sm mt-2 pt-2 border-t border-gray-300">
+                                    <span className="font-semibold text-gray-900">Total TTC:</span>
+                                    <span className="font-bold text-blue-600">
+                                      {calculatedTotal.toFixed(2)} €
+                                      {hasDifference && extractedTotal > 0 && (
+                                        <span className="text-orange-600 text-xs ml-1">⚠️ (extrait: {extractedTotal.toFixed(2)} €)</span>
+                                      )}
+                                    </span>
+                                  </div>
+                                  {hasDifference && (
+                                    <div className="mt-2 text-xs text-orange-600 bg-orange-50 px-2 py-1 rounded">
+                                      ⚠️ Le total calculé ({calculatedTotal.toFixed(2)} €) diffère du total extrait ({extractedTotal.toFixed(2)} €). Utilisez le total calculé pour les ventilations.
+                                    </div>
+                                  )}
+                                </>
+                              )
+                            })()}
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="h-full flex items-center justify-center text-sm text-gray-500">
+                          <div className="text-center p-4">
+                            <div className="text-gray-400 mb-3 text-4xl">📋</div>
+                            <div className="font-medium text-gray-700 mb-1">Aucun article extrait</div>
+                            <div className="text-xs text-gray-500 mb-4">Les articles n'ont pas pu être extraits de cette facture</div>
+                            <Button
+                              size="sm"
+                              className="bg-blue-600 hover:bg-blue-700 text-white"
+                              disabled={retrying || invoice?.status === 'processing' || invoice?.status === 'queued'}
+                              onClick={async () => {
+                                try {
+                                  setRetrying(true)
+                                  setError(null)
+                                  const { data: { session } } = await supabase.auth.getSession()
+                                  const token = session?.access_token || ''
+                                  
+                                  // Ajouter la tâche à la queue
+                                  const addRes = await fetch('/api/queue/add', {
+                                    method: 'POST',
+                                    headers: {
+                                      'Content-Type': 'application/json',
+                                      ...(token ? { Authorization: `Bearer ${token}` } : {})
+                                    },
+                                    body: JSON.stringify({ invoiceId: params.id })
+                                  })
+                                  
+                                  const addData = await addRes.json()
+                                  if (!addRes.ok) {
+                                    throw new Error(addData.error || 'Impossible de relancer l\'extraction')
+                                  }
+                                  
+                                  // Mettre à jour le statut local
+                                  setInvoice((prev: any) => prev ? { ...prev, status: 'queued' } : prev)
+                                  
+                                  // Polling pour suivre le statut
+                                  const poll = async () => {
+                                    try {
+                                      const statusRes = await fetch(`/api/queue/status?invoiceId=${params.id}`, {
+                                        headers: token ? { Authorization: `Bearer ${token}` } : undefined
+                                      })
+                                      const statusData = await statusRes.json()
+                                      if (statusData.status === 'completed' || statusData.status === 'failed') {
+                                        // Recharger la facture
+                                        const rr = await fetch(`/api/invoices/${params.id}`, {
+                                          headers: token ? { Authorization: `Bearer ${token}` } : undefined
+                                        })
+                                        const dd = await rr.json()
+                                        if (rr.ok) {
+                                          setInvoice(dd.invoice)
+                                          setRetrying(false)
+                                        }
+                                      } else if (statusData.status === 'processing') {
+                                        setInvoice((prev: any) => prev ? { ...prev, status: 'processing' } : prev)
+                                        setTimeout(poll, 4000)
+                                      } else {
+                                        setTimeout(poll, 4000)
+                                      }
+                                    } catch {}
+                                  }
+                                  poll()
+                                } catch (e: any) {
+                                  setError(e.message)
+                                  setRetrying(false)
+                                }
+                              }}
+                            >
+                              {retrying || invoice?.status === 'processing' || invoice?.status === 'queued' 
+                                ? 'Extraction en cours...' 
+                                : "🔄 Relancer l'extraction"}
+                            </Button>
+                            {(invoice?.status === 'processing' || invoice?.status === 'queued') && (
+                              <div className="mt-2 text-xs text-blue-600">
+                                Extraction en cours, veuillez patienter...
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </div>
             </>
           )}
         </div>
@@ -1881,6 +2913,191 @@ export default function InvoiceEditPage() {
             ) : (
               <div className="h-full flex items-center justify-center text-white">Aucun aperçu</div>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* Modal de duplication avec sélection d'articles */}
+      {showDuplicateModal && invoice?.extracted_data?.items && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-lg shadow-xl max-w-3xl w-full max-h-[90vh] flex flex-col">
+            <div className="p-4 border-b border-gray-200 flex items-center justify-between">
+              <h2 className="text-lg font-semibold text-gray-900">Dupliquer la facture avec sélection d'articles</h2>
+              <button
+                onClick={() => setShowDuplicateModal(false)}
+                className="text-gray-400 hover:text-gray-600"
+              >
+                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+            
+            <div className="flex-1 overflow-y-auto p-4">
+              <div className="mb-4 text-sm text-gray-600">
+                Sélectionnez les articles à inclure dans la facture dupliquée. Les montants seront recalculés automatiquement.
+              </div>
+              
+              <div className="space-y-2">
+                {invoice.extracted_data.items.map((item: any, idx: number) => {
+                  const isSelected = selectedItems.has(idx)
+                  const amounts = calculateItemAmounts(item)
+                  const itemHT = amounts.ht
+                  const itemTTC = amounts.ttc
+                  const itemTVA = amounts.tva
+                  
+                  return (
+                    <div
+                      key={idx}
+                      className={`border rounded-lg p-3 cursor-pointer transition-all ${
+                        isSelected
+                          ? 'border-blue-500 bg-blue-50 shadow-sm'
+                          : 'border-gray-200 bg-white hover:border-gray-300'
+                      }`}
+                      onClick={() => {
+                        const newSet = new Set(selectedItems)
+                        if (isSelected) {
+                          newSet.delete(idx)
+                        } else {
+                          newSet.add(idx)
+                        }
+                        setSelectedItems(newSet)
+                      }}
+                    >
+                      <div className="flex items-start gap-3">
+                        <div className="mt-1">
+                          <input
+                            type="checkbox"
+                            checked={isSelected}
+                            onChange={() => {}}
+                            className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+                          />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <div className="font-medium text-gray-900">{item.description || `Article ${idx + 1}`}</div>
+                          {item.reference && (
+                            <div className="text-xs text-gray-500 mt-1">Réf: {item.reference}</div>
+                          )}
+                          <div className="mt-2 grid grid-cols-4 gap-2 text-xs text-gray-600">
+                            <div>
+                              <span className="text-gray-500">Qté:</span> {item.quantity || 1}
+                            </div>
+                            <div>
+                              <span className="text-gray-500">P.U.:</span> {Number(item.unit_price || 0).toFixed(2)} €
+                            </div>
+                            <div>
+                              <span className="text-gray-500">HT:</span> {itemHT.toFixed(2)} €
+                            </div>
+                            <div>
+                              <span className="text-gray-500">TTC:</span> <span className="font-semibold">{itemTTC.toFixed(2)} €</span>
+                            </div>
+                          </div>
+                          {(() => {
+                            const normalizedRate = normalizeTaxRate(item.tax_rate, invoice?.extracted_data?.supplier_name)
+                            return normalizedRate !== null ? (
+                              <div className="mt-1 text-xs text-gray-500">TVA: {normalizedRate.toFixed(2)}%</div>
+                            ) : null
+                          })()}
+        </div>
+      </div>
+                    </div>
+                  )
+                })}
+              </div>
+              
+              {/* Résumé des montants sélectionnés */}
+              {selectedItems.size > 0 && (
+                <div className="mt-6 p-4 bg-gray-50 rounded-lg border border-gray-200">
+                  <div className="text-sm font-semibold text-gray-700 mb-2">Résumé de la facture dupliquée</div>
+                  <div className="grid grid-cols-3 gap-4 text-sm">
+                    <div>
+                      <div className="text-gray-500">Articles sélectionnés</div>
+                      <div className="font-semibold text-gray-900">{selectedItems.size} / {invoice.extracted_data.items.length}</div>
+                    </div>
+                    <div>
+                      <div className="text-gray-500">Total HT</div>
+                      <div className="font-semibold text-gray-900">
+                        {(() => {
+                          let totalHT = 0
+                          selectedItems.forEach((idx) => {
+                            const item = invoice.extracted_data.items[idx]
+                            const amounts = calculateItemAmounts(item)
+                            totalHT += amounts.ht
+                          })
+                          return totalHT.toFixed(2)
+                        })()} €
+                      </div>
+                    </div>
+                    <div>
+                      <div className="text-gray-500">Total TTC</div>
+                      <div className="font-semibold text-blue-600">
+                        {(() => {
+                          let totalTTC = 0
+                          selectedItems.forEach((idx) => {
+                            const item = invoice.extracted_data.items[idx]
+                            totalTTC += Number(item.total_price || 0)
+                          })
+                          return totalTTC.toFixed(2)
+                        })()} €
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+            
+            <div className="p-4 border-t border-gray-200 flex items-center justify-end gap-3">
+              <Button
+                variant="outline"
+                onClick={() => setShowDuplicateModal(false)}
+                disabled={duplicating}
+              >
+                Annuler
+              </Button>
+              <Button
+                className="bg-blue-600 hover:bg-blue-700 text-white"
+                onClick={async () => {
+                  if (selectedItems.size === 0) {
+                    setError('Veuillez sélectionner au moins un article')
+                    return
+                  }
+                  
+                  try {
+                    setDuplicating(true)
+                    setError(null)
+                    
+                    const { data: { session } } = await supabase.auth.getSession()
+                    const res = await fetch('/api/invoices/duplicate', {
+                      method: 'POST',
+                      headers: {
+                        'Content-Type': 'application/json',
+                        ...(session?.access_token ? { Authorization: `Bearer ${session.access_token}` } : {})
+                      },
+                      body: JSON.stringify({
+                        source_invoice_id: params.id,
+                        selected_item_indices: Array.from(selectedItems)
+                      })
+                    })
+                    
+                    const data = await res.json()
+                    
+                    if (!res.ok) {
+                      throw new Error(data.error || 'Erreur lors de la duplication')
+                    }
+                    
+                    // Rediriger vers la nouvelle facture
+                    router.push(`/invoices/${data.invoice.id}`)
+                  } catch (e: any) {
+                    setError(e.message)
+                  } finally {
+                    setDuplicating(false)
+                  }
+                }}
+                disabled={selectedItems.size === 0 || duplicating}
+              >
+                {duplicating ? 'Création en cours...' : `Créer la facture dupliquée (${selectedItems.size} article${selectedItems.size > 1 ? 's' : ''})`}
+              </Button>
+            </div>
           </div>
         </div>
       )}

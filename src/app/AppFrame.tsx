@@ -8,7 +8,9 @@ const navItems = [
   { href: '/', label: 'Dashboard', icon: 'i-home' },
   { href: '/invoices', label: 'Mes factures', icon: 'i-file-text' },
   { href: '/suppliers', label: 'Fournisseurs', icon: 'i-users' },
+  { href: '/products', label: 'Produits', icon: 'i-package' },
   { href: '/stats', label: 'Stats', icon: 'i-chart' },
+  { href: '/chat', label: 'Assistant', icon: 'i-message-circle' },
   { href: '/org', label: 'Organisation', icon: 'i-building' },
 ]
 

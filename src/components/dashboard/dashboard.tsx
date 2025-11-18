@@ -8,6 +8,7 @@ import { Button } from '@/components/ui/button'
 import { InvoiceList } from '@/components/invoices/invoice-list'
 import { StatsCards } from '@/components/dashboard/stats-cards'
 import { Insights } from '@/components/dashboard/insights'
+import { TokenUsage } from '@/components/dashboard/token-usage'
 import { FileText, LogOut, Upload } from 'lucide-react'
 import Link from 'next/link'
 
@@ -134,6 +135,8 @@ export function Dashboard() {
         <StatsCards filters={{...computeFilters(range, year, month), supplier: supplier || undefined, status: status || undefined}} />
         {/* Insights */}
         <Insights filters={{...computeFilters(range, year, month), supplier: supplier || undefined, status: status || undefined}} />
+        {/* Consommation de tokens */}
+        <TokenUsage />
         {/* Liste récente */}
         <InvoiceList from={computeFilters(range, year, month).from} to={computeFilters(range, year, month).to} />
       </main>

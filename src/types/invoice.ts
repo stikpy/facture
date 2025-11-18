@@ -45,6 +45,8 @@ export interface InvoiceItem {
   unit_price: number
   total_price: number
   tax_rate?: number
+  is_ht?: boolean // true si total_price est HT, false si TTC (par défaut: true pour compatibilité)
+  reference?: string // Code référence produit (ex: "018422", "022209")
 }
 
 export interface InvoiceClassification {

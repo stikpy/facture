@@ -14,7 +14,15 @@
     "merge-suppliers:dry": "node scripts/merge-suppliers.js --dry-run",
     "backfill-suppliers": "node scripts/backfill-suppliers.js",
     "backfill-suppliers:dry": "node scripts/backfill-suppliers.js --dry-run",
-    "migrate-storage-org": "node scripts/migrate-storage-to-org.js"
+    "migrate-storage-org": "node scripts/migrate-storage-to-org.js",
+    "extract-products": "npx tsx scripts/extract-products-from-invoices.ts",
+    "vectorize-invoices": "npx tsx scripts/vectorize-invoices.ts",
+    "explore-db": "npx tsx scripts/explore-database.ts",
+    "test-chatbot": "npx tsx scripts/test-chatbot.ts",
+    "test-db-tools": "npx tsx scripts/test-database-tools.ts",
+    "test-chatbot-direct": "npx tsx scripts/test-chatbot-direct.ts",
+    "interact-chatbot": "npx tsx scripts/interact-chatbot.ts",
+    "test-chatbot-internal": "npx tsx scripts/test-chatbot-internal.ts"
   },
   "dependencies": {
     "@langchain/community": "^0.3.7",

@@ -50,11 +50,13 @@ export async function GET(
 
     let allocations: any[] = []
     try {
-      const { data: allocData, error: allocErr } = await supabaseAdmin
+      // Récupérer toutes les allocations de la facture (pas seulement celles de l'utilisateur actuel)
+      // car les allocations sont partagées au niveau de l'organisation
+      // La politique RLS permettra aux membres de l'organisation de voir toutes les allocations
+      const { data: allocData, error: allocErr } = await supabase
         .from('invoice_allocations')
         .select('*')
         .eq('invoice_id', invoiceId)
-        .eq('user_id', user.id)
         .order('created_at', { ascending: true })
       if (allocErr) throw allocErr
       allocations = allocData || []
@@ -237,6 +239,7 @@ export async function PUT(
             amount: Number(a.amount || 0),
             vat_code: a.vat_code ? String(a.vat_code) : null,
             vat_rate: a.vat_rate != null ? Number(a.vat_rate) : null,
+            item_indices: Array.isArray(a.item_indices) ? a.item_indices : [],
           }))
           console.log('🔍 [API] Nouvelles allocations à insérer:', rows)
           

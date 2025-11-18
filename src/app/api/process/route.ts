@@ -107,9 +107,24 @@ export async function POST(request: NextRequest) {
 
       // Traitement avec l'IA
       console.log('🤖 [SERVER] Début du traitement IA')
-      const documentProcessor = new DocumentProcessor()
+      const documentProcessor = new DocumentProcessor(invoice.organization_id)
       const extractedData = await documentProcessor.processDocument(extractedText, fileName)
       console.log('✅ [SERVER] Données extraites par l\'IA:', extractedData)
+
+      // Enregistrer la consommation de tokens
+      const tokenUsage = (extractedData as any).__tokenUsage
+      if (tokenUsage && invoice.organization_id) {
+        const { recordTokenUsage } = await import('@/lib/token-usage')
+        await recordTokenUsage({
+          organization_id: invoice.organization_id,
+          invoice_id: fileId,
+          model_name: 'gpt-5-mini',
+          input_tokens: tokenUsage.input_tokens || 0,
+          output_tokens: tokenUsage.output_tokens || 0,
+          total_tokens: tokenUsage.total_tokens || 0,
+          operation_type: 'extraction',
+        })
+      }
 
       // POST-VALIDATION: Vérifier que fournisseur ≠ client
       if ((extractedData as any)?.supplier_name && (extractedData as any)?.client_name) {
@@ -179,6 +194,21 @@ export async function POST(request: NextRequest) {
 
       const classification = await documentProcessor.classifyInvoice(extractedData)
       console.log('✅ [SERVER] Classification:', classification)
+
+      // Enregistrer la consommation de tokens pour la classification
+      const classificationTokenUsage = (classification as any).__tokenUsage
+      if (classificationTokenUsage && invoice.organization_id) {
+        const { recordTokenUsage } = await import('@/lib/token-usage')
+        await recordTokenUsage({
+          organization_id: invoice.organization_id,
+          invoice_id: fileId,
+          model_name: 'gpt-5-mini',
+          input_tokens: classificationTokenUsage.input_tokens || 0,
+          output_tokens: classificationTokenUsage.output_tokens || 0,
+          total_tokens: classificationTokenUsage.total_tokens || 0,
+          operation_type: 'classification',
+        })
+      }
 
       // Upsert supplier avec organization_id de la facture
       try {

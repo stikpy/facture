@@ -4,6 +4,8 @@ import { StorageService } from '@/lib/storage'
 import { DocumentProcessor } from '@/lib/ai/document-processor'
 import { OCRProcessor } from '@/lib/ai/ocr-processor'
 import { upsertSupplier } from '@/lib/suppliers'
+import { recordTokenUsage } from '@/lib/token-usage'
+import { syncProductsFromInvoice } from '@/lib/products/sync-products'
 
 export const maxDuration = 300 // 5 minutes max pour Vercel
 export const runtime = 'nodejs'
@@ -15,11 +17,15 @@ export async function GET(request: NextRequest) {
   
   try {
     // Récupérer la prochaine tâche à traiter
+    // Exclure les tâches qui ont une erreur de quota récente (moins de 2 minutes)
+    const twoMinutesAgo = new Date(Date.now() - 2 * 60 * 1000).toISOString()
     const { data: task, error: taskError } = await (supabaseAdmin
       .from('processing_queue')
       .select('*, invoices(*)')
       .eq('status', 'pending')
-      .lt('attempts', 3) // Max 3 tentatives
+      .lt('attempts', 5) // Max 5 tentatives (augmenté pour gérer les quotas)
+      // Exclure les tâches avec erreur de quota récente
+      .or(`error_message.is.null,error_message.not.ilike.%quota%,updated_at.lt.${twoMinutesAgo}`)
       .order('priority', { ascending: false })
       .order('created_at', { ascending: true })
       .limit(1)
@@ -60,8 +66,10 @@ export async function GET(request: NextRequest) {
       if (error) throw new Error(`DB update invoices->processing: ${error.message}`)
     }
 
+    let invoiceRef: any = null
     try {
       const invoice = (task as any).invoices
+      invoiceRef = invoice
       console.log('[WORKER] Facture:', {
         id: (invoice as any).id,
         file_name: (invoice as any).file_name,
@@ -204,10 +212,24 @@ export async function GET(request: NextRequest) {
 
       // Traitement IA (avec retry sur rotations alternatives si extraction vide)
       console.log('🤖 [WORKER] Traitement IA')
-      const documentProcessor = new DocumentProcessor()
+      const documentProcessor = new DocumentProcessor((invoice as any).organization_id)
       const tAiStart = Date.now()
       let extractedData = await documentProcessor.processDocument(extractedText, (invoice as any).file_name)
       console.log('[WORKER] IA extraction done in', Date.now() - tAiStart, 'ms')
+
+      // Enregistrer la consommation de tokens pour l'extraction principale
+      const tokenUsage = (extractedData as any).__tokenUsage
+      if (tokenUsage && (invoice as any).organization_id) {
+        await recordTokenUsage({
+          organization_id: (invoice as any).organization_id,
+          invoice_id: (task as any).invoice_id,
+          model_name: 'gpt-5-mini',
+          input_tokens: tokenUsage.input_tokens || 0,
+          output_tokens: tokenUsage.output_tokens || 0,
+          total_tokens: tokenUsage.total_tokens || 0,
+          operation_type: 'extraction',
+        })
+      }
 
       // Post-correction: si la date/numéro de l'en-tête FACTURE est trouvée, les privilégier
       try {
@@ -241,12 +263,61 @@ export async function GET(request: NextRequest) {
           }
         }
         if (supplierHeaderCandidate) {
+          // Liste des mots-clés de document à ignorer (pas des noms de fournisseurs)
+          const documentKeywords = [
+            'DUPLICATA', 'DUPLICATE', 'ORIGINAL', 'FACTURE', 'INVOICE', 
+            'BON DE COMMANDE', 'BON DE LIVRAISON', 'BL', 'BC',
+            'AVOIR', 'CREDIT NOTE', 'NOTE DE CREDIT',
+            'DEVIS', 'QUOTE', 'QUOTATION',
+            'RECU', 'RECEPTION', 'RECEIPT'
+          ]
+          const candUpper = supplierHeaderCandidate.toUpperCase().trim()
+          const isDocumentKeyword = documentKeywords.some(keyword => 
+            candUpper === keyword || candUpper.includes(keyword)
+          )
+          
+          // Vérifier si le fournisseur actuel existe déjà dans la base
+          let currentSupplierExists = false
+          if (ed.supplier_name && (invoice as any).organization_id) {
+            try {
+              const { normalizeSupplier } = await import('@/lib/suppliers')
+              const normalizedCurrent = normalizeSupplier(ed.supplier_name)
+              const { data: existingSupplier } = await (supabaseAdmin as any)
+                .from('suppliers')
+                .select('id')
+                .eq('organization_id', (invoice as any).organization_id)
+                .eq('normalized_key', normalizedCurrent)
+                .maybeSingle()
+              currentSupplierExists = !!existingSupplier
+            } catch (e) {
+              console.warn('[WORKER] Erreur lors de la vérification du fournisseur existant:', e)
+            }
+          }
+          
           const clientNorm = String(ed.client_name || '').toLowerCase().trim()
           const candNorm = supplierHeaderCandidate.toLowerCase().trim()
-          if (!clientNorm || candNorm !== clientNorm) {
-            console.log('[WORKER] Override supplier_name from header top block', { old: ed.supplier_name, fromHeader: supplierHeaderCandidate })
-            ed.supplier_name = supplierHeaderCandidate
-            extractedData = ed
+          
+          // Ne remplacer que si :
+          // 1. Ce n'est pas un mot-clé de document
+          // 2. Ce n'est pas le nom du client
+          // 3. Le fournisseur actuel n'existe pas déjà dans la base (ou n'est pas défini)
+          if (!isDocumentKeyword && (!clientNorm || candNorm !== clientNorm)) {
+            if (!currentSupplierExists) {
+              console.log('[WORKER] Override supplier_name from header top block', { old: ed.supplier_name, fromHeader: supplierHeaderCandidate })
+              ed.supplier_name = supplierHeaderCandidate
+              extractedData = ed
+            } else {
+              console.log('[WORKER] Conserve supplier_name existant (trouvé en base)', { 
+                current: ed.supplier_name, 
+                headerCandidate: supplierHeaderCandidate,
+                reason: 'Fournisseur déjà enregistré'
+              })
+            }
+          } else if (isDocumentKeyword) {
+            console.log('[WORKER] Ignore header candidate (mot-clé de document)', { 
+              candidate: supplierHeaderCandidate,
+              current: ed.supplier_name
+            })
           }
         }
       } catch {}
@@ -292,6 +363,20 @@ export async function GET(request: NextRequest) {
       const tClassStart = Date.now()
       let classification = await documentProcessor.classifyInvoice(extractedData)
       console.log('[WORKER] IA classification done in', Date.now() - tClassStart, 'ms')
+
+      // Enregistrer la consommation de tokens pour la classification
+      const classificationTokenUsage = (classification as any).__tokenUsage
+      if (classificationTokenUsage && (invoice as any).organization_id) {
+        await recordTokenUsage({
+          organization_id: (invoice as any).organization_id,
+          invoice_id: (task as any).invoice_id,
+          model_name: 'gpt-5-mini',
+          input_tokens: classificationTokenUsage.input_tokens || 0,
+          output_tokens: classificationTokenUsage.output_tokens || 0,
+          total_tokens: classificationTokenUsage.total_tokens || 0,
+          operation_type: 'classification',
+        })
+      }
       
       // Vérifier si l'extraction a échoué (tous les champs importants sont null)
       const isExtractionEmpty = !extractedData.invoice_number && 
@@ -312,10 +397,39 @@ export async function GET(request: NextRequest) {
                                !retryData.supplier_name &&
                                (!retryData.items || retryData.items.length === 0)
           
+          // Enregistrer les tokens du retry
+          const retryTokenUsage = (retryData as any).__tokenUsage
+          if (retryTokenUsage && (invoice as any).organization_id) {
+            await recordTokenUsage({
+              organization_id: (invoice as any).organization_id,
+              invoice_id: (task as any).invoice_id,
+              model_name: 'gpt-5-mini',
+              input_tokens: retryTokenUsage.input_tokens || 0,
+              output_tokens: retryTokenUsage.output_tokens || 0,
+              total_tokens: retryTokenUsage.total_tokens || 0,
+              operation_type: 'extraction',
+            })
+          }
+          
           if (!retryIsEmpty) {
             console.log(`✅ [WORKER] Extraction réussie avec rotation ${alt.rotation}°`)
             extractedData = retryData
-            classification = await documentProcessor.classifyInvoice(extractedData)
+            const retryClassification = await documentProcessor.classifyInvoice(extractedData)
+            classification = retryClassification
+            
+            // Enregistrer les tokens de la classification du retry
+            const retryClassTokenUsage = (retryClassification as any).__tokenUsage
+            if (retryClassTokenUsage && (invoice as any).organization_id) {
+              await recordTokenUsage({
+                organization_id: (invoice as any).organization_id,
+                invoice_id: (task as any).invoice_id,
+                model_name: 'gpt-5-mini',
+                input_tokens: retryClassTokenUsage.input_tokens || 0,
+                output_tokens: retryClassTokenUsage.output_tokens || 0,
+                total_tokens: retryClassTokenUsage.total_tokens || 0,
+                operation_type: 'classification',
+              })
+            }
             break
           } else {
             console.log(`❌ [WORKER] Retry ${i + 1} toujours vide`)
@@ -330,6 +444,19 @@ export async function GET(request: NextRequest) {
           const pageText = pageTexts[i]
           try {
             const perPage = await documentProcessor.processDocument(pageText, `${(invoice as any).file_name}#p${i+1}`)
+            // Enregistrer les tokens de l'enrichissement par page
+            const perPageTokenUsage = (perPage as any).__tokenUsage
+            if (perPageTokenUsage && (invoice as any).organization_id) {
+              await recordTokenUsage({
+                organization_id: (invoice as any).organization_id,
+                invoice_id: (task as any).invoice_id,
+                model_name: 'gpt-5-mini',
+                input_tokens: perPageTokenUsage.input_tokens || 0,
+                output_tokens: perPageTokenUsage.output_tokens || 0,
+                total_tokens: perPageTokenUsage.total_tokens || 0,
+                operation_type: 'extraction',
+              })
+            }
             if (perPage?.items?.length) {
               const current = Array.isArray(extractedData.items) ? extractedData.items : []
               extractedData.items = [...current, ...perPage.items]
@@ -339,7 +466,22 @@ export async function GET(request: NextRequest) {
           }
         }
         // Recalcul de classification après fusion
-        classification = await documentProcessor.classifyInvoice(extractedData)
+        const finalClassification = await documentProcessor.classifyInvoice(extractedData)
+        classification = finalClassification
+        
+        // Enregistrer les tokens de la classification finale
+        const finalClassTokenUsage = (finalClassification as any).__tokenUsage
+        if (finalClassTokenUsage && (invoice as any).organization_id) {
+          await recordTokenUsage({
+            organization_id: (invoice as any).organization_id,
+            invoice_id: (task as any).invoice_id,
+            model_name: 'gpt-5-mini',
+            input_tokens: finalClassTokenUsage.input_tokens || 0,
+            output_tokens: finalClassTokenUsage.output_tokens || 0,
+            total_tokens: finalClassTokenUsage.total_tokens || 0,
+            operation_type: 'classification',
+          })
+        }
       }
       
       // Log de synthèse pour corréler avec l'affichage UI
@@ -497,6 +639,8 @@ export async function GET(request: NextRequest) {
       if (extractedData.items && extractedData.items.length > 0) {
         const items = extractedData.items.map((item: any) => ({
           invoice_id: (task as any).invoice_id,
+          // référence si disponible (colonne ajoutée conditionnellement par migration)
+          reference: item.reference ?? null,
           description: item.description,
           quantity: item.quantity,
           unit_price: item.unit_price,
@@ -508,6 +652,27 @@ export async function GET(request: NextRequest) {
             .from('invoice_items')
             .insert(items as any)
           if (error) throw new Error(`DB insert invoice_items: ${error.message}`)
+        }
+
+        // Synchroniser les produits vers la table products
+        if ((invoice as any).organization_id && (invoice as any).supplier_id) {
+          console.log('🔄 [WORKER] Synchronisation des produits vers la table products...')
+          try {
+            const { synced, errors } = await syncProductsFromInvoice({
+              organizationId: (invoice as any).organization_id,
+              supplierId: (invoice as any).supplier_id,
+              items: extractedData.items
+            })
+            if (synced > 0) {
+              console.log(`✅ [WORKER] ${synced} produit(s) synchronisé(s)`)
+            }
+            if (errors > 0) {
+              console.warn(`⚠️ [WORKER] ${errors} erreur(s) lors de la synchronisation des produits`)
+            }
+          } catch (syncError: any) {
+            console.warn('⚠️ [WORKER] Erreur lors de la synchronisation des produits (non bloquant):', syncError.message)
+            // Ne pas bloquer le traitement si la synchronisation échoue
+          }
         }
       }
 
@@ -534,14 +699,56 @@ export async function GET(request: NextRequest) {
     } catch (processingError) {
       console.error('❌ [WORKER] Erreur traitement:', processingError)
 
-      // Marquer comme échoué si max tentatives atteintes
-      const newStatus = (task as any).attempts + 1 >= 3 ? 'failed' : 'pending'
+      const error = processingError as Error & { isQuotaError?: boolean; statusCode?: number }
+      const isQuotaError = error.isQuotaError || error.statusCode === 429 || error.message?.includes('429') || error.message?.includes('quota')
 
+      // Pour les erreurs de quota, on remet en pending avec un délai plus long
+      // Pour les autres erreurs, on suit la logique normale
+      const maxAttempts = isQuotaError ? 5 : 3 // Plus de tentatives pour les erreurs de quota
+      const newStatus = (task as any).attempts + 1 >= maxAttempts ? 'failed' : 'pending'
+
+      // Si c'est une erreur de quota et qu'on n'a pas atteint le max, on remet en pending
+      // Le worker réessayera plus tard (les limites se réinitialisent par minute/heure)
+      if (isQuotaError && (task as any).attempts + 1 < maxAttempts) {
+        console.log('⚠️ [WORKER] Erreur de quota détectée. La tâche sera réessayée plus tard.')
+        await (supabaseAdmin as any)
+          .from('processing_queue')
+          .update({
+            status: 'pending',
+            error_message: `Quota dépassé (tentative ${(task as any).attempts + 1}/${maxAttempts}). Réessai automatique prévu.`,
+            // Réinitialiser started_at pour permettre un nouveau traitement
+            started_at: null
+          } as any)
+          .eq('id', (task as any).id)
+
+        await (supabaseAdmin as any)
+          .from('invoices')
+          .update({
+            status: 'queued',
+            extracted_data: { 
+              ...((invoiceRef as any)?.extracted_data || {}),
+              quota_error: true,
+              quota_retry_at: new Date(Date.now() + 60000).toISOString() // Réessayer dans 1 minute
+            }
+          } as any)
+          .eq('id', (task as any).invoice_id)
+
+        return NextResponse.json(
+          {
+            error: 'Quota OpenAI dépassé',
+            message: 'La tâche sera réessayée automatiquement dans quelques instants.',
+            retry: true
+          },
+          { status: 429 }
+        )
+      }
+
+      // Pour les autres erreurs ou si max tentatives atteintes
       await (supabaseAdmin as any)
         .from('processing_queue')
         .update({
           status: newStatus,
-          error_message: (processingError as Error).message
+          error_message: error.message
         } as any)
         .eq('id', (task as any).id)
 
@@ -549,14 +756,17 @@ export async function GET(request: NextRequest) {
         .from('invoices')
         .update({
           status: 'error',
-          extracted_data: { error: (processingError as Error).message }
+          extracted_data: { 
+            ...((invoiceRef as any)?.extracted_data || {}),
+            error: error.message 
+          }
         } as any)
         .eq('id', (task as any).invoice_id)
 
       return NextResponse.json(
         {
           error: 'Erreur lors du traitement',
-          message: (processingError as Error).message
+          message: error.message
         },
         { status: 500 }
       )

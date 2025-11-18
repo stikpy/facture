@@ -551,11 +551,11 @@ export default function StatsPage() {
           )}
 
           {byCenter.length > 0 && (
-            <section className='space-y-4'>
-              <div className='flex items-center justify-between'>
+          <section className='space-y-4'>
+            <div className='flex items-center justify-between'>
                 <h2 className='text-lg font-medium'>Dépenses par centre (ventilations)</h2>
-                <button
-                  className='text-sm text-primary hover:underline'
+              <button
+                className='text-sm text-primary hover:underline'
                   onClick={() => {
                     const rows = byCenter.map(r => {
                       const txt = String((r as any).center || '')
@@ -573,47 +573,47 @@ export default function StatsPage() {
                     })
                     downloadCsv('depenses_par_centre', rows, ['account_code','account_label','ht','tva','total','lines'])
                   }}
-                >
-                  Export CSV
-                </button>
-              </div>
-              <div className='h-64 w-full border rounded-md bg-white p-2'>
-                <ResponsiveContainer width="100%" height="100%">
+              >
+                Export CSV
+              </button>
+            </div>
+            <div className='h-64 w-full border rounded-md bg-white p-2'>
+              <ResponsiveContainer width="100%" height="100%">
                   <BarChart data={byCenter.slice(0, 12)} layout='vertical' margin={{ top: 10, right: 20, left: 40, bottom: 0 }}>
-                    <CartesianGrid strokeDasharray="3 3" />
-                    <XAxis type='number' />
+                  <CartesianGrid strokeDasharray="3 3" />
+                  <XAxis type='number' />
                     <YAxis type='category' dataKey='center' width={260} />
-                    <Tooltip formatter={(v: any) => typeof v === 'number' ? numberFmt.format(v) : v} />
+                  <Tooltip formatter={(v: any) => typeof v === 'number' ? numberFmt.format(v) : v} />
                     <Legend />
                     <Bar dataKey='total' name='Total ventilé' fill='#7c3aed' />
-                  </BarChart>
-                </ResponsiveContainer>
-              </div>
-              <div className='overflow-auto border rounded-md'>
-                <table className='min-w-full text-sm'>
-                  <thead className='bg-gray-50'>
-                    <tr>
-                      <th className='text-left px-4 py-2'>Centre</th>
-                      <th className='text-right px-4 py-2'>Total</th>
-                      <th className='text-right px-4 py-2'>HT</th>
-                      <th className='text-right px-4 py-2'>TVA</th>
-                      <th className='text-right px-4 py-2'>#</th>
-                    </tr>
-                  </thead>
-                  <tbody>
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+            <div className='overflow-auto border rounded-md'>
+              <table className='min-w-full text-sm'>
+                <thead className='bg-gray-50'>
+                  <tr>
+                    <th className='text-left px-4 py-2'>Centre</th>
+                    <th className='text-right px-4 py-2'>Total</th>
+                    <th className='text-right px-4 py-2'>HT</th>
+                    <th className='text-right px-4 py-2'>TVA</th>
+                    <th className='text-right px-4 py-2'>#</th>
+                  </tr>
+                </thead>
+                <tbody>
                     {byCenter.map((r) => (
                       <tr key={r.center} className='border-t'>
                         <td className='px-4 py-2'>{r.center}</td>
-                        <td className='px-4 py-2 text-right'>{numberFmt.format(r.total)}</td>
-                        <td className='px-4 py-2 text-right'>{numberFmt.format(r.ht)}</td>
-                        <td className='px-4 py-2 text-right'>{numberFmt.format(r.tva)}</td>
-                        <td className='px-4 py-2 text-right'>{r.count}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </section>
+                      <td className='px-4 py-2 text-right'>{numberFmt.format(r.total)}</td>
+                      <td className='px-4 py-2 text-right'>{numberFmt.format(r.ht)}</td>
+                      <td className='px-4 py-2 text-right'>{numberFmt.format(r.tva)}</td>
+                      <td className='px-4 py-2 text-right'>{r.count}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </section>
           )}
 
           <section className='space-y-4'>

@@ -136,11 +136,14 @@ export async function GET(request: NextRequest) {
     let byCenterMap = new Map<string, { total: number; ht: number; tva: number; count: number }>()
     let unassigned = { ht: 0, tva: 0, total: 0, count: 0, invoices: new Set<string>() as Set<string> }
     if (filteredIds.length > 0) {
-      const { data: allocs } = await (supabaseAdmin as any)
+      // Récupérer toutes les allocations des factures de l'organisation
+      // La RLS permet aux membres de voir toutes les allocations de leur organisation
+      // Utiliser le client normal (avec RLS) au lieu de supabaseAdmin pour respecter les permissions
+      const { data: allocs } = await supabase
         .from('invoice_allocations')
         .select('invoice_id, account_code, amount, vat_code, vat_rate, user_id')
         .in('invoice_id', filteredIds)
-        .eq('user_id', user.id)
+        // Ne pas filtrer par user_id - la RLS permet de voir toutes les allocations de l'organisation
       // Map comptes d'organisation pour les libellés (centres existants)
       const accountLabels = new Map<string, string>()
       if (orgId) {

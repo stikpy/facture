@@ -1,0 +1,103 @@
+{
+  "invoices": {
+    "columns": [
+      "id",
+      "user_id",
+      "organization_id",
+      "supplier_id",
+      "file_name",
+      "file_path",
+      "file_size",
+      "mime_type",
+      "extracted_data",
+      "status",
+      "classification",
+      "created_at",
+      "updated_at"
+    ],
+    "notes": "extracted_data contient invoice_number, supplier_name, invoice_date, subtotal, total_amount, items[]…"
+  },
+  "invoice_items": {
+    "columns": [
+      "invoice_id",
+      "reference",
+      "description",
+      "quantity",
+      "unit_price",
+      "total_price",
+      "tax_rate",
+      "is_ht"
+    ],
+    "notes": "Table logique des lignes extraites; lien via invoice_id → invoices.id"
+  },
+  "invoice_allocations": {
+    "columns": [
+      "id",
+      "invoice_id",
+      "user_id",
+      "organization_id",
+      "account_code",
+      "label",
+      "amount",
+      "vat_code",
+      "vat_rate",
+      "item_indices",
+      "created_at",
+      "updated_at"
+    ]
+  },
+  "products": {
+    "columns": [
+      "id",
+      "organization_id",
+      "supplier_id",
+      "reference",
+      "name",
+      "description",
+      "price",
+      "vat_rate",
+      "vat_code",
+      "unit",
+      "is_active",
+      "created_at",
+      "updated_at"
+    ]
+  },
+  "suppliers": {
+    "columns": [
+      "id",
+      "organization_id",
+      "display_name",
+      "code",
+      "normalized_key",
+      "is_active",
+      "created_at",
+      "updated_at"
+    ]
+  },
+  "organization_accounts": {
+    "columns": [
+      "id",
+      "organization_id",
+      "code",
+      "label",
+      "created_at",
+      "updated_at"
+    ]
+  },
+  "organization_vat_codes": {
+    "columns": [
+      "id",
+      "organization_id",
+      "code",
+      "label",
+      "rate",
+      "created_at",
+      "updated_at"
+    ]
+  }
+}
+
+
+
+

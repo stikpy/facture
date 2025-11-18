@@ -162,22 +162,51 @@ export function InvoiceList({ from, to }: { from?: string; to?: string }) {
 
       const invoices = (data as any[]) || []
       setRawInvoices(invoices as any || [])
-      // Charger la présence de ventilations pour ce user
+      // Charger la présence de ventilations pour toutes les factures de l'organisation
+      // (pas seulement celles de l'utilisateur actuel, car les allocations sont partagées au niveau de l'organisation)
       try {
         const ids = invoices.map((i: any) => i.id)
         if (ids.length) {
-          const { data: allocs } = await (supabase
+          // Récupérer toutes les allocations des factures de l'organisation
+          // Les factures sont déjà filtrées par organization_id, donc on récupère toutes les allocations
+          // de ces factures, peu importe quel utilisateur les a créées
+          const { data: allocs, error: allocError } = await supabase
             .from('invoice_allocations')
             .select('invoice_id')
-            .eq('user_id', user.id)
-            .in('invoice_id', ids) as any)
-          const map: Record<string, boolean> = {}
-          for (const a of (allocs || [])) map[(a as any).invoice_id] = true
-          setAllocatedMap(map as any)
+            .in('invoice_id', ids)
+          
+          if (allocError) {
+            console.warn('Erreur récupération allocations (RLS peut bloquer):', allocError)
+            // Si RLS bloque, on essaie avec les allocations de l'utilisateur actuel comme fallback
+            const { data: userAllocs } = await supabase
+              .from('invoice_allocations')
+              .select('invoice_id')
+              .eq('user_id', user.id)
+              .in('invoice_id', ids)
+            
+            const map: Record<string, boolean> = {}
+            for (const a of (userAllocs || [])) {
+              map[(a as any).invoice_id] = true
+            }
+            setAllocatedMap(map as any)
+          } else {
+            const map: Record<string, boolean> = {}
+            // Créer un Set des invoice_id qui ont des allocations
+            const invoiceIdsWithAllocs = new Set((allocs || []).map((a: any) => (a as any).invoice_id))
+            for (const inv of invoices) {
+              if (invoiceIdsWithAllocs.has(inv.id)) {
+                map[inv.id] = true
+              }
+            }
+            setAllocatedMap(map as any)
+          }
         } else {
           setAllocatedMap({} as any)
         }
-      } catch { setAllocatedMap({} as any) }
+      } catch (err) {
+        console.error('Erreur chargement allocations:', err)
+        setAllocatedMap({} as any)
+      }
     } catch (error) {
       console.error('Erreur lors du chargement des factures:', error)
     }

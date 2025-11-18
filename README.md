@@ -6,7 +6,7 @@ Une solution moderne de traitement intelligent de factures utilisant l'IA pour l
 
 - **Upload de factures** : Support PDF, JPG, PNG, TIFF
 - **OCR intelligent** : Extraction de texte avec Tesseract.js
-- **IA avancée** : Traitement avec LangChain et OpenAI GPT-4
+- **IA avancée** : Traitement avec LangChain et OpenAI GPT-5-mini
 - **Classification automatique** : Catégorisation des factures
 - **Recherche sémantique** : Trouvez vos factures facilement
 - **Interface moderne** : Design responsive avec Next.js 15
@@ -16,7 +16,7 @@ Une solution moderne de traitement intelligent de factures utilisant l'IA pour l
 
 - **Frontend** : Next.js 15, React 19, TypeScript, Tailwind CSS
 - **Backend** : Supabase (PostgreSQL, Auth, Storage)
-- **IA** : LangChain, OpenAI GPT-4, Tesseract.js
+- **IA** : LangChain, OpenAI GPT-5-mini, Tesseract.js
 - **OCR** : Tesseract.js pour l'extraction de texte
 - **UI** : Radix UI, Lucide React, shadcn/ui
 
@@ -105,13 +105,13 @@ supabase db push
 ### Traitement des documents
 
 1. **OCR** : Extraction de texte avec Tesseract.js
-2. **LangChain** : Traitement avec GPT-4
+2. **LangChain** : Traitement avec GPT-5
 3. **Classification** : Catégorisation automatique
 4. **Extraction** : Données structurées (fournisseur, montant, etc.)
 
 ### Modèles utilisés
 
-- **GPT-4** : Traitement et extraction de données
+- **GPT-5** : Traitement et extraction de données
 - **Tesseract.js** : OCR pour images et PDF
 - **LangChain** : Orchestration des workflows IA
 

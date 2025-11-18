@@ -96,7 +96,7 @@ export async function GET(request: NextRequest) {
     // Optionnel: recherche sémantique (non bloquante)
     let semanticResults: any[] = []
     try {
-      const documentProcessor = new DocumentProcessor()
+      const documentProcessor = new DocumentProcessor(orgId || undefined)
       const sem = await documentProcessor.searchSimilarInvoices(term, 5)
       semanticResults = sem.map(doc => ({ content: doc.pageContent, metadata: doc.metadata }))
     } catch {}

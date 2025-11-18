@@ -126,7 +126,19 @@ export default function OrgAdminPage() {
   const inviteMember = async () => {
     if (!inviteEmail.trim()) return
     const res = await fetch('/api/orgs/members', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email: inviteEmail.trim() }) })
-    if (res.ok) { setInviteEmail(''); await loadMembers() }
+    if (res.ok) { 
+      const data = await res.json().catch(() => ({}))
+      setInviteEmail('')
+      await loadMembers()
+      if (data.warning) {
+        alert(`Invitation créée mais ${data.warning.toLowerCase()}. Code: ${data.invite_code}`)
+      } else {
+        alert(`Invitation envoyée à ${inviteEmail.trim()} !`)
+      }
+    } else {
+      const data = await res.json().catch(() => ({}))
+      alert(data.error || 'Erreur lors de l\'invitation')
+    }
   }
 
   const removeMember = async (userId: string) => {
