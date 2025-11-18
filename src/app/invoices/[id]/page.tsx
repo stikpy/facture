@@ -117,6 +117,7 @@ export default function InvoiceEditPage() {
   const [invoice, setInvoice] = useState<any | null>(null)
   const [pdfUrl, setPdfUrl] = useState<string | null>(null)
   const [showPreview, setShowPreview] = useState(true)
+  const [documentType, setDocumentType] = useState<DocumentTypeKey>('invoice')
   const [rightPanelTab, setRightPanelTab] = useState<'pdf' | 'invoice'>('pdf') // 'pdf' ou 'invoice'
   const [pdfZoom, setPdfZoom] = useState(100)
   const [pdfRotation, setPdfRotation] = useState(0)
@@ -366,6 +367,9 @@ export default function InvoiceEditPage() {
         setInvoice(data.invoice)
         setSupplierName(supplier)
         setSupplierId(data.invoice?.supplier_id || null)
+        // Type de document (facture, avoir, BL, devis, autre)
+        const initialDocType = (data.invoice?.document_type || data.invoice?.extracted_data?.document_type || 'invoice') as DocumentTypeKey
+        setDocumentType(initialDocType)
         
         // Synchroniser le code fournisseur si disponible
         if (data.invoice?.supplier_id && data.invoice?.supplier) {
@@ -663,6 +667,7 @@ export default function InvoiceEditPage() {
           supplier_name: supplierName,
           supplier_id: supplierId,
           description,
+          document_type: documentType,
           // Propriétés éditées
           client_name: clientName || undefined,
           invoice_number: invoiceNumber || undefined,
@@ -680,6 +685,7 @@ export default function InvoiceEditPage() {
         // Mettre à jour l'objet invoice local pour l'affichage
         setInvoice((prev: any) => ({
           ...prev,
+          document_type: documentType,
           extracted_data: {
             ...prev?.extracted_data,
             supplier_name: supplierName,
@@ -1440,7 +1446,21 @@ export default function InvoiceEditPage() {
                 </div>
                 <div>
                   <div className="text-gray-500">Type de document</div>
-                  <div className="font-medium">Facture d'achat</div>
+                  {isEditingProps ? (
+                    <select
+                      value={documentType}
+                      onChange={(e) => setDocumentType(e.target.value as DocumentTypeKey)}
+                      className="w-full h-9 border border-gray-300 rounded-md px-3 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white hover:border-gray-400 transition-colors"
+                    >
+                      <option value="invoice">Facture</option>
+                      <option value="credit_note">Avoir</option>
+                      <option value="delivery_note">Bon de livraison</option>
+                      <option value="quote">Devis</option>
+                      <option value="other">Autre</option>
+                    </select>
+                  ) : (
+                    <div className="font-medium">{getDocumentTypeMeta(documentType).label}</div>
+                  )}
                 </div>
                 <div>
                   <div className="text-gray-500">N° document</div>
