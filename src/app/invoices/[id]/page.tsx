@@ -569,24 +569,49 @@ export default function InvoiceEditPage() {
   useEffect(() => {
     const loadDuplicates = async () => {
       try {
-        const invNumber = (invoice as any)?.extracted_data?.invoice_number
-        if (!invoice?.id || !invoice?.organization_id || !invNumber) {
+        const invNumber = String((invoice as any)?.extracted_data?.invoice_number || '').trim()
+        const docRef = String((invoice as any)?.document_reference || (invoice as any)?.extracted_data?.document_reference || '').trim()
+        if (!invoice?.id || !invoice?.organization_id || (!invNumber && !docRef)) {
           setDuplicateCandidates([])
           return
         }
+        // Construire une requête large puis filtrer côté client si besoin
         let query = (supabase
           .from('invoices')
-          .select('id, file_name, created_at, status, extracted_data')
+          .select('id, file_name, created_at, status, document_type, document_reference, extracted_data')
           .eq('organization_id', invoice.organization_id)
           .neq('id', invoice.id)
-          .filter('extracted_data->>invoice_number', 'eq', String(invNumber)) as any)
+          // Correspondance sur N° de facture ou référence détectée
+          .or([
+            invNumber ? `extracted_data->>invoice_number.eq.${invNumber}` : '',
+            docRef ? `document_reference.eq.${docRef}` : '',
+            docRef ? `extracted_data->>document_reference.eq.${docRef}` : '',
+          ].filter(Boolean).join(',')) as any)
         if ((invoice as any)?.supplier_id) {
           query = query.eq('supplier_id', (invoice as any).supplier_id)
         }
         const { data } = await (query
           .order('created_at', { ascending: false })
           .limit(5) as any)
-        setDuplicateCandidates((data || []) as any[])
+        // Normalisation côté client: comparer en supprimant tout sauf les chiffres
+        const onlyDigits = (s: any) => String(s || '').replace(/\D+/g, '')
+        const probeKeys = new Set<string>([
+          onlyDigits(invNumber),
+          onlyDigits(docRef),
+        ].filter(Boolean))
+        const filtered = (data || []).filter((d: any) => {
+          const cand = new Set<string>([
+            onlyDigits(d?.extracted_data?.invoice_number),
+            onlyDigits(d?.document_reference),
+            onlyDigits(d?.extracted_data?.document_reference),
+          ].filter(Boolean))
+          // Intersection non vide → on garde
+          for (const k of cand) {
+            if (probeKeys.has(k)) return true
+          }
+          return false
+        })
+        setDuplicateCandidates(filtered as any[])
       } catch {
         setDuplicateCandidates([])
       }
@@ -1089,7 +1114,7 @@ export default function InvoiceEditPage() {
                           <div className="flex items-center gap-2 shrink-0">
                             <button
                               className="text-xs px-2 py-1 border rounded hover:bg-gray-50"
-                              onClick={() => router.push(`/invoices/${d.id}`)}
+                              onClick={() => window.open(`/invoices/${d.id}`, '_blank')}
                             >Ouvrir</button>
                             <button
                               className="text-xs px-2 py-1 border rounded hover:bg-gray-50"
